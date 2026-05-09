@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ASL Agent Settings</title>
+  <title>ASL Node Panel Settings</title>
 
   <style>
     :root {
@@ -218,14 +218,14 @@
 <body>
   <main>
     <header>
-      <h1>ASL Agent Settings</h1>
+      <h1>ASL Node Panel Settings</h1>
       <p class="subtitle">
-        Configure the Raspberry Pi ASL Agent REST service used by the Chrome extension.
+        Configure the Raspberry Pi ASL Node Panel REST service used by the Chrome extension.
       </p>
     </header>
 
     <section aria-labelledby="agent-settings-title">
-      <h2 id="agent-settings-title">ASL Agent Connection</h2>
+      <h2 id="agent-settings-title">ASL Node Panel Connection</h2>
 
       <div class="field">
         <label for="baseUrl">Base URL</label>
@@ -238,7 +238,7 @@
           spellcheck="false"
         />
         <p class="hint">
-          The ASL Agent FastAPI base URL running on the user’s Raspberry Pi.
+          The ASL Node Panel FastAPI base URL running on the user’s Raspberry Pi.
           Example: <code>http://192.168.1.50:8000</code>
         </p>
       </div>
@@ -249,12 +249,12 @@
           id="apiKey"
           name="apiKey"
           type="password"
-          placeholder="Enter ASL Agent API key"
+          placeholder="Enter ASL Node Panel API key"
           autocomplete="off"
           spellcheck="false"
         />
         <p class="hint">
-          Sent with every ASL Agent request as the <code>x-api-key</code> header.
+          Sent with every ASL Node Panel request as the <code>x-api-key</code> header.
         </p>
       </div>
 
