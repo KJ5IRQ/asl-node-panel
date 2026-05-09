@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ASL Agent Control Panel</title>
+  <title>ASL Node Panel</title>
   <link rel="stylesheet" href="sidepanel.css" />
 </head>
 
@@ -12,7 +12,7 @@
     <header class="status-header" aria-labelledby="app-title">
       <div class="title-row">
         <div>
-          <h1 id="app-title">ASL Agent</h1>
+          <h1 id="app-title">ASL Node Panel</h1>
           <p id="connectionStatus" class="muted">Not connected</p>
         </div>
 
@@ -40,6 +40,9 @@
         <div class="summary-card">
           <span class="summary-label">Connected</span>
           <strong id="statusConnectedCount">—</strong>
+        </div>
+        <div class="summary-card keyed-card">
+          <span id="statusRxKeyed" class="keyed-badge"></span>
         </div>
       </section>
     </header>
