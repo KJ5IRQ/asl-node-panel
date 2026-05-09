@@ -4,15 +4,13 @@ import { getSettings, isConfigured } from "./services/storage.js";
 import {
   getStatus,
   getConnectedNodes,
+  getVariables,
   connectNode,
-  disconnectNode,
   disconnectAll,
   sendDtmf,
   getAudit
 } from "./services/api.js";
 
-const CONNECT_VERIFY_DELAY_MS = 8000;
-const DISCONNECT_VERIFY_DELAY_MS = 5000;
 const AUTO_REFRESH_INTERVAL_MS = 15000;
 const AUDIT_LINES = 50;
 
@@ -22,6 +20,7 @@ const state = {
   connectedNodes: [],
   connectedCount: 0,
   status: null,
+  variables: null,
   busy: false,
   refreshTimer: null,
   footerTimer: null
@@ -47,6 +46,7 @@ function bindElements() {
   els.statusCallsign = requireElement("statusCallsign");
   els.statusKeyups = requireElement("statusKeyups");
   els.statusConnectedCount = requireElement("statusConnectedCount");
+  els.statusRxKeyed = requireElement("statusRxKeyed");
 
   els.connectForm = requireElement("connectForm");
   els.connectNodeInput = requireElement("connectNodeInput");
@@ -88,7 +88,6 @@ function bindEvents() {
   els.refreshStatus.addEventListener("click", () => refreshAll({ manual: true }));
   els.refreshAudit.addEventListener("click", () => refreshAudit({ manual: true }));
 
-  els.connectedNodesList.addEventListener("click", handleConnectedNodesClick);
   els.favoritesList.addEventListener("click", handleFavoritesClick);
 
   els.disconnectAll.addEventListener("click", handleDisconnectAll);
@@ -162,7 +161,6 @@ function handleConnectFromInput(monitorOnly) {
     busyText: monitorOnly
       ? `Connecting to ${node} in monitor-only mode…`
       : `Connecting to ${node} in transceive mode…`,
-    delayMs: CONNECT_VERIFY_DELAY_MS,
     action: async () => {
       await connectNode(node, { monitorOnly });
       els.connectNodeInput.value = "";
@@ -188,28 +186,10 @@ function handleFavoritesClick(event) {
     busyText: monitorOnly
       ? `Connecting favorite ${node} in monitor-only mode…`
       : `Connecting favorite ${node} in transceive mode…`,
-    delayMs: CONNECT_VERIFY_DELAY_MS,
     action: () => connectNode(node, { monitorOnly }),
     successMessage: monitorOnly
       ? `Monitor-only connect request sent for favorite ${node}.`
       : `Transceive connect request sent for favorite ${node}.`
-  });
-}
-
-function handleConnectedNodesClick(event) {
-  const button = event.target.closest("[data-disconnect-node]");
-
-  if (!button) {
-    return;
-  }
-
-  const node = button.dataset.disconnectNode;
-
-  runTimedOperation({
-    busyText: `Disconnecting node ${node}…`,
-    delayMs: DISCONNECT_VERIFY_DELAY_MS,
-    action: () => disconnectNode(node),
-    successMessage: `Disconnect request sent for node ${node}.`
   });
 }
 
@@ -224,7 +204,6 @@ function handleDisconnectAll() {
 
   runTimedOperation({
     busyText: "Disconnecting all nodes…",
-    delayMs: DISCONNECT_VERIFY_DELAY_MS,
     action: () => disconnectAll(),
     successMessage: "Disconnect-all request sent."
   });
@@ -243,7 +222,7 @@ function handleSendDtmf() {
   });
 }
 
-async function runTimedOperation({ busyText, delayMs, action, successMessage }) {
+async function runTimedOperation({ busyText, action, successMessage }) {
   if (state.busy) {
     return;
   }
@@ -257,7 +236,6 @@ async function runTimedOperation({ busyText, delayMs, action, successMessage }) 
 
   try {
     await action();
-    await sleep(delayMs);
     await refreshAll({ manual: false, force: true, silent: true });
     setFooter(successMessage, "success", 3000);
   } catch (error) {
@@ -316,9 +294,10 @@ async function refreshAll(options = {}) {
     setConnectionStatus("Refreshing…");
   }
 
-  const [statusResult, nodesResult, auditResult] = await Promise.allSettled([
+  const [statusResult, nodesResult, variablesResult, auditResult] = await Promise.allSettled([
     getStatus(),
     getConnectedNodes(),
+    getVariables(),
     getAudit(AUDIT_LINES)
   ]);
 
@@ -340,6 +319,12 @@ async function refreshAll(options = {}) {
     hadError = true;
     console.error(nodesResult.reason);
     renderEmptyConnectedNodes(`Failed to load connected nodes: ${nodesResult.reason.message}`);
+  }
+
+  if (variablesResult.status === "fulfilled") {
+    state.variables = variablesResult.value;
+  } else {
+    console.error(variablesResult.reason);
   }
 
   if (auditResult.status === "fulfilled") {
@@ -407,6 +392,13 @@ function renderStatusHeader() {
   els.statusCallsign.textContent = valueOrDash(status.callsign);
   els.statusKeyups.textContent = valueOrDash(status.keyups_today);
   els.statusConnectedCount.textContent = String(state.connectedCount);
+  renderKeyedIndicator();
+}
+
+function renderKeyedIndicator() {
+  const rxKeyed = Boolean(state.variables?.rxkeyed);
+  els.statusRxKeyed.textContent = rxKeyed ? "KEYED" : "";
+  els.statusRxKeyed.className = rxKeyed ? "keyed-badge active" : "keyed-badge";
 }
 
 function clearStatusHeader() {
@@ -414,6 +406,8 @@ function clearStatusHeader() {
   els.statusCallsign.textContent = "—";
   els.statusKeyups.textContent = "—";
   els.statusConnectedCount.textContent = "—";
+  els.statusRxKeyed.textContent = "";
+  els.statusRxKeyed.className = "keyed-badge";
 }
 
 function renderFavorites() {
@@ -474,9 +468,24 @@ function renderConnectedNodes(nodes) {
     const item = document.createElement("div");
     item.className = "connected-node-item";
 
+    const nodeWrap = document.createElement("div");
+    nodeWrap.className = "node-identity";
+
     const node = document.createElement("div");
     node.className = "node-number";
     node.textContent = connectedNode.node;
+
+    if (connectedNode.callsign) {
+      const callsign = document.createElement("div");
+      callsign.className = "node-callsign";
+      callsign.textContent = connectedNode.callsign;
+      if (connectedNode.location) {
+        callsign.title = connectedNode.location;
+      }
+      nodeWrap.append(node, callsign);
+    } else {
+      nodeWrap.appendChild(node);
+    }
 
     const mode = document.createElement("span");
     mode.className = `mode-badge ${connectedNode.mode.toLowerCase()}`;
@@ -488,13 +497,7 @@ function renderConnectedNodes(nodes) {
     info.textContent = connectedNode.info || getModeLabel(connectedNode.mode);
     info.title = connectedNode.info || getModeLabel(connectedNode.mode);
 
-    const disconnect = document.createElement("button");
-    disconnect.type = "button";
-    disconnect.className = "danger small";
-    disconnect.textContent = "Disconnect";
-    disconnect.dataset.disconnectNode = connectedNode.node;
-
-    item.append(node, mode, info, disconnect);
+    item.append(nodeWrap, mode, info);
     els.connectedNodesList.appendChild(item);
   }
 }
@@ -529,10 +532,10 @@ function normalizeStatus(payload) {
   return {
     node: String(payload?.node || ""),
     callsign: String(payload?.callsign || ""),
-    keyups_today: String(payload?.keyups_today || ""),
-    uptime: String(payload?.uptime || ""),
-    connected_nodes: String(payload?.connected_nodes || ""),
-    raw_output: Array.isArray(payload?.raw_output) ? payload.raw_output : []
+    keyups_today: String(payload?.keyups_today ?? ""),
+    uptime: payload?.uptime?.display || payload?.uptime?.raw || "",
+    tx_time_today: payload?.tx_time_today?.display || payload?.tx_time_today?.raw || "",
+    tx_time_total: payload?.tx_time_total?.display || payload?.tx_time_total?.raw || ""
   };
 }
 
@@ -560,6 +563,8 @@ function normalizeConnectedNode(value) {
   const node = String(value?.node || "").trim().toUpperCase();
   const mode = String(value?.mode || "").trim().toUpperCase();
   const info = String(value?.info || "").trim();
+  const callsign = String(value?.callsign || "").trim();
+  const location = String(value?.location || "").trim();
 
   if (!isValidNodeIdentifier(node)) {
     return null;
@@ -568,7 +573,9 @@ function normalizeConnectedNode(value) {
   return {
     node,
     mode: mode === "R" ? "R" : "T",
-    info
+    info,
+    callsign,
+    location
   };
 }
 
