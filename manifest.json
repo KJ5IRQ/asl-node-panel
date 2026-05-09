@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ASL Agent Control Panel",
-  "version": "0.1.0",
-  "description": "Monitor and control an ASL3 AllStarLink node from Chrome using ASL Agent.",
+  "name": "ASL Node Panel",
+  "version": "0.2.0",
+  "description": "Monitor and control your AllStar Link node via ASL3-API.",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",
@@ -21,6 +21,6 @@
     "default_path": "sidepanel.html"
   },
   "action": {
-    "default_title": "ASL Agent Control Panel"
+    "default_title": "ASL Node Panel"
   }
 }
