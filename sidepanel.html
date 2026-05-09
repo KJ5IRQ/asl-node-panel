@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ASL Agent Control Panel</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+
+<body>
+  <main class="app-shell">
+    <header class="status-header" aria-labelledby="app-title">
+      <div class="title-row">
+        <div>
+          <h1 id="app-title">ASL Agent</h1>
+          <p id="connectionStatus" class="muted">Not connected</p>
+        </div>
+
+        <button id="openSettings" class="icon-button" type="button" title="Open settings" aria-label="Open settings">
+          ⚙
+        </button>
+      </div>
+
+      <section class="node-summary" aria-label="Node status summary">
+        <div class="summary-card">
+          <span class="summary-label">Node</span>
+          <strong id="statusNode">—</strong>
+        </div>
+
+        <div class="summary-card">
+          <span class="summary-label">Callsign</span>
+          <strong id="statusCallsign">—</strong>
+        </div>
+
+        <div class="summary-card">
+          <span class="summary-label">Keyups Today</span>
+          <strong id="statusKeyups">—</strong>
+        </div>
+
+        <div class="summary-card">
+          <span class="summary-label">Connected</span>
+          <strong id="statusConnectedCount">—</strong>
+        </div>
+      </section>
+    </header>
+
+    <section class="panel-section" aria-labelledby="connect-title">
+      <div class="section-title-row">
+        <h2 id="connect-title">Connect Node</h2>
+      </div>
+
+      <form id="connectForm" class="connect-form">
+        <label class="sr-only" for="connectNodeInput">Node number</label>
+        <input
+          id="connectNodeInput"
+          type="text"
+          inputmode="numeric"
+          placeholder="Enter node number"
+          autocomplete="off"
+          spellcheck="false"
+        />
+
+        <div class="button-row">
+          <button id="connectTransceive" type="submit" data-connect-mode="transceive">
+            Connect T
+          </button>
+
+          <button id="connectMonitor" class="secondary" type="button" data-connect-mode="monitor">
+            Monitor R
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel-section" aria-labelledby="favorites-title">
+      <div class="section-title-row">
+        <h2 id="favorites-title">Favorites</h2>
+        <button id="refreshFavorites" class="small secondary" type="button">Refresh</button>
+      </div>
+
+      <div id="favoritesList" class="favorites-list" aria-live="polite">
+        <div class="empty-state">No favorites configured.</div>
+      </div>
+    </section>
+
+    <section class="panel-section connected-section" aria-labelledby="connected-title">
+      <div class="section-title-row">
+        <h2 id="connected-title">Connected Nodes</h2>
+
+        <div class="section-actions">
+          <button id="refreshStatus" class="small secondary" type="button">Refresh</button>
+          <button id="disconnectAll" class="small danger" type="button">Disconnect All</button>
+        </div>
+      </div>
+
+      <div id="busyMessage" class="busy-message" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="busyText">Working…</span>
+      </div>
+
+      <div id="connectedNodesList" class="connected-nodes-list" aria-live="polite">
+        <div class="empty-state">No connected nodes loaded yet.</div>
+      </div>
+    </section>
+
+    <section class="panel-section" aria-labelledby="dtmf-title">
+      <div class="section-title-row">
+        <h2 id="dtmf-title">DTMF</h2>
+      </div>
+
+      <form id="dtmfForm" class="dtmf-form">
+        <label class="sr-only" for="dtmfInput">DTMF sequence</label>
+        <input
+          id="dtmfInput"
+          type="text"
+          placeholder="DTMF sequence"
+          autocomplete="off"
+          spellcheck="false"
+        />
+
+        <button id="sendDtmf" type="submit">
+          Send
+        </button>
+      </form>
+
+      <p class="hint">
+        DTMF requests are sent with <code>confirmed: true</code>.
+      </p>
+    </section>
+
+    <section class="panel-section audit-section" aria-labelledby="audit-title">
+      <div class="section-title-row">
+        <h2 id="audit-title">Audit Log</h2>
+        <button id="refreshAudit" class="small secondary" type="button">Refresh</button>
+      </div>
+
+      <div id="auditLog" class="audit-log" aria-live="polite">
+        <div class="empty-state">No audit entries loaded yet.</div>
+      </div>
+    </section>
+
+    <footer class="footer-status">
+      <span id="footerMessage" role="status" aria-live="polite"></span>
+    </footer>
+  </main>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
