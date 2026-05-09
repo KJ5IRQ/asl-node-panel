@@ -33,7 +33,7 @@ export class AslAgentClient {
   }
 
   async getConnectedNodes() {
-    return this.request("/nodes");
+    return this.request("/nodes?enrich=true");
   }
 
   async connectNode(node, { monitorOnly = false } = {}) {
@@ -89,6 +89,34 @@ export class AslAgentClient {
   async getAudit(lines = DEFAULT_AUDIT_LINES) {
     const normalizedLines = normalizeAuditLines(lines);
     return this.request(`/audit?lines=${encodeURIComponent(normalizedLines)}`);
+  }
+
+  async getVariables() {
+    return this.request("/variables");
+  }
+
+  async lookupNode(node) {
+    return this.request(`/lookup/${encodeURIComponent(normalizeNodeNumber(node))}`);
+  }
+
+  async getVersion() {
+    return this.request("/version");
+  }
+
+  async copIdentify() {
+    return this.request("/cop/identify", { method: "POST" });
+  }
+
+  async copTime() {
+    return this.request("/cop/time", { method: "POST" });
+  }
+
+  async copStatus() {
+    return this.request("/cop/status", { method: "POST" });
+  }
+
+  async copVersion() {
+    return this.request("/cop/version", { method: "POST" });
   }
 
   async request(path, options = {}) {
@@ -208,6 +236,41 @@ export async function runMacro(macroNumber) {
 export async function getAudit(lines = DEFAULT_AUDIT_LINES) {
   const client = await createClientFromSettings();
   return client.getAudit(lines);
+}
+
+export async function getVariables() {
+  const client = await createClientFromSettings();
+  return client.getVariables();
+}
+
+export async function lookupNode(node) {
+  const client = await createClientFromSettings();
+  return client.lookupNode(node);
+}
+
+export async function getVersion() {
+  const client = await createClientFromSettings();
+  return client.getVersion();
+}
+
+export async function copIdentify() {
+  const client = await createClientFromSettings();
+  return client.copIdentify();
+}
+
+export async function copTime() {
+  const client = await createClientFromSettings();
+  return client.copTime();
+}
+
+export async function copStatus() {
+  const client = await createClientFromSettings();
+  return client.copStatus();
+}
+
+export async function copVersion() {
+  const client = await createClientFromSettings();
+  return client.copVersion();
 }
 
 export function normalizeDtmfSequence(value) {
