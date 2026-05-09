@@ -492,3 +492,44 @@ h2 {
     grid-column: 1 / -1;
   }
 }
+/* Keyed state indicator */
+.keyed-card {
+  justify-content: center;
+  align-items: center;
+  min-width: 3.5rem;
+}
+
+.keyed-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  color: transparent;
+  background: transparent;
+  transition: color 0.2s, background 0.2s;
+}
+
+.keyed-badge.active {
+  color: #0f172a;
+  background: #f97316;
+}
+
+/* Node identity (number + callsign stacked) */
+.node-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.node-callsign {
+  font-size: 0.65rem;
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
