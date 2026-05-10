@@ -301,6 +301,64 @@
       </div>
     </section>
 
+    <section aria-labelledby="dtmf-macros-title">
+      <h2 id="dtmf-macros-title">DTMF Macros</h2>
+      <p class="hint">Up to 6 quick-tap DTMF buttons shown in the panel.</p>
+
+      <div class="field-row">
+        <input id="macroLabel" type="text" placeholder="Label (e.g. Parrot)" maxlength="20" />
+        <input id="macroSequence" type="text" placeholder="Sequence (e.g. *70)" maxlength="30" />
+        <button id="addMacro" type="button">Add</button>
+      </div>
+      <div id="macrosList" class="item-list"></div>
+    </section>
+
+    <section aria-labelledby="schedules-title">
+      <h2 id="schedules-title">Schedules</h2>
+      <p class="hint">Auto-connect or disconnect on a weekly schedule.</p>
+
+      <div class="schedule-form">
+        <div class="field-row">
+          <input id="scheduleNode" type="text" placeholder="Node number" maxlength="10" />
+          <select id="scheduleAction">
+            <option value="connect">Connect</option>
+            <option value="disconnect">Disconnect</option>
+            <option value="disconnect-all">Disconnect All</option>
+          </select>
+          <select id="scheduleMode">
+            <option value="transceive">Transceive</option>
+            <option value="monitor">Monitor</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <select id="scheduleHour"></select>
+          <span class="field-sep">:</span>
+          <select id="scheduleMinute"></select>
+          <span class="field-hint-inline">UTC</span>
+        </div>
+        <div class="day-picker" id="dayPicker">
+          <label><input type="checkbox" value="0" /> Sun</label>
+          <label><input type="checkbox" value="1" /> Mon</label>
+          <label><input type="checkbox" value="2" /> Tue</label>
+          <label><input type="checkbox" value="3" /> Wed</label>
+          <label><input type="checkbox" value="4" /> Thu</label>
+          <label><input type="checkbox" value="5" /> Fri</label>
+          <label><input type="checkbox" value="6" /> Sat</label>
+        </div>
+        <button id="addSchedule" type="button">Add Schedule</button>
+      </div>
+      <div id="schedulesList" class="item-list"></div>
+    </section>
+
+    <section aria-labelledby="warning-title">
+      <h2 id="warning-title">Node Count Warning</h2>
+      <div class="field-group">
+        <label for="nodeCountWarning">Warn when connected nodes exceeds</label>
+        <input id="nodeCountWarning" type="number" min="0" max="999" placeholder="0 = disabled" />
+        <p class="hint">Panel header flashes amber when this threshold is crossed. Set to 0 to disable.</p>
+      </div>
+    </section>
+
     <section aria-labelledby="refresh-title">
       <h2 id="refresh-title">Refresh Interval</h2>
 
