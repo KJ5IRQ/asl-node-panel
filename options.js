@@ -1,12 +1,14 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEYS = ["baseUrl", "apiKey", "favorites"];
+  const STORAGE_KEYS = ["baseUrl", "apiKey", "favorites", "refreshInterval", "collapsedSections"];
 
   const DEFAULT_SETTINGS = {
     baseUrl: "",
     apiKey: "",
-    favorites: []
+    favorites: [],
+    refreshInterval: 15,
+    collapsedSections: []
   };
 
   const state = {
@@ -34,6 +36,7 @@
     els.addFavorite = document.getElementById("addFavorite");
     els.favoritesList = document.getElementById("favoritesList");
 
+    els.refreshInterval = document.getElementById("refreshInterval");
     els.saveSettings = document.getElementById("saveSettings");
     els.resetSettings = document.getElementById("resetSettings");
     els.statusMessage = document.getElementById("statusMessage");
@@ -56,6 +59,9 @@
 
       els.baseUrl.value = settings.baseUrl || "";
       els.apiKey.value = settings.apiKey || "";
+      if (els.refreshInterval) {
+        els.refreshInterval.value = String(settings.refreshInterval || 15);
+      }
       state.favorites = sanitizeFavorites(settings.favorites);
 
       renderFavorites();
@@ -83,7 +89,8 @@
       await storageSet({
         baseUrl: validated.baseUrl,
         apiKey: validated.apiKey,
-        favorites: validated.favorites
+        favorites: validated.favorites,
+        refreshInterval: validated.refreshInterval
       });
 
       setStatus("Settings saved.", "success", 2000);
@@ -217,10 +224,15 @@
       throw new Error("API key is required.");
     }
 
+    const refreshInterval = els.refreshInterval
+      ? Number(els.refreshInterval.value)
+      : 15;
+
     return {
       baseUrl,
       apiKey,
-      favorites
+      favorites,
+      refreshInterval: [5, 15, 30, 60].includes(refreshInterval) ? refreshInterval : 15
     };
   }
 
