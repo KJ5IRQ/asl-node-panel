@@ -1,6 +1,7 @@
 "use strict";
 
 import { getSettings, isConfigured } from "./services/storage.js";
+import { storageSet } from "./services/storage.js";
 import {
   getStatus,
   getConnectedNodes,
@@ -8,10 +9,15 @@ import {
   connectNode,
   disconnectAll,
   sendDtmf,
-  getAudit
+  getAudit,
+  lookupNode,
+  copIdentify,
+  copTime,
+  copStatus,
+  copVersion
 } from "./services/api.js";
 
-const AUTO_REFRESH_INTERVAL_MS = 15000;
+const DEFAULT_REFRESH_INTERVAL_MS = 15000;
 const AUDIT_LINES = 50;
 
 const state = {
@@ -23,7 +29,8 @@ const state = {
   variables: null,
   busy: false,
   refreshTimer: null,
-  footerTimer: null
+  footerTimer: null,
+  collapsedSections: new Set()
 };
 
 const els = {};
@@ -36,6 +43,7 @@ async function init() {
   bindMessages();
 
   await loadInitialState();
+  applyCollapsedSections();
   startAutoRefresh();
 }
 
@@ -48,6 +56,11 @@ function bindElements() {
   els.statusKeyups = requireElement("statusKeyups");
   els.statusConnectedCount = requireElement("statusConnectedCount");
   els.statusRxKeyed = requireElement("statusRxKeyed");
+  els.nodeLookupResult = requireElement("nodeLookupResult");
+  els.copIdentify = requireElement("copIdentify");
+  els.copTime = requireElement("copTime");
+  els.copStatus = requireElement("copStatus");
+  els.copVersion = requireElement("copVersion");
 
   els.connectForm = requireElement("connectForm");
   els.connectNodeInput = requireElement("connectNodeInput");
@@ -97,6 +110,17 @@ function bindEvents() {
     event.preventDefault();
     handleSendDtmf();
   });
+
+  els.copIdentify.addEventListener("click", () => handleCop("identify"));
+  els.copTime.addEventListener("click", () => handleCop("time"));
+  els.copStatus.addEventListener("click", () => handleCop("status"));
+  els.copVersion.addEventListener("click", () => handleCop("version"));
+
+  els.connectNodeInput.addEventListener("input", handleNodeLookupInput);
+
+  document.querySelectorAll(".section-toggle").forEach((btn) => {
+    btn.addEventListener("click", handleSectionToggle);
+  });
 }
 
 function bindMessages() {
@@ -138,6 +162,9 @@ async function loadSettingsIntoState() {
 
   state.settings = settings;
   state.favorites = Array.isArray(settings.favorites) ? settings.favorites : [];
+  state.collapsedSections = new Set(
+    Array.isArray(settings.collapsedSections) ? settings.collapsedSections : []
+  );
 }
 
 async function handleRefreshFavorites() {
@@ -689,12 +716,14 @@ function setFooter(message, type = "", timeoutMs = 0) {
 function startAutoRefresh() {
   stopAutoRefresh();
 
+  const intervalMs = (state.settings?.refreshInterval || 15) * 1000;
+
   state.refreshTimer = window.setInterval(() => {
     refreshAll({
       manual: false,
       silent: true
     });
-  }, AUTO_REFRESH_INTERVAL_MS);
+  }, intervalMs);
 }
 
 function stopAutoRefresh() {
@@ -727,6 +756,87 @@ function requireElement(id) {
   }
 
   return element;
+}
+
+
+async function handleCop(command) {
+  const actions = { identify: copIdentify, time: copTime, status: copStatus, version: copVersion };
+  const labels = { identify: "Identify", time: "Time", status: "Status", version: "Version" };
+
+  runImmediateOperation({
+    busyText: `Sending COP ${labels[command]}…`,
+    action: () => actions[command](),
+    successMessage: `COP ${labels[command]} sent.`
+  });
+}
+
+let nodeLookupTimer = null;
+
+function handleNodeLookupInput() {
+  const value = els.connectNodeInput.value.trim();
+
+  window.clearTimeout(nodeLookupTimer);
+  els.nodeLookupResult.hidden = true;
+  els.nodeLookupResult.textContent = "";
+
+  if (!/^\d{4,7}$/.test(value)) {
+    return;
+  }
+
+  nodeLookupTimer = window.setTimeout(async () => {
+    try {
+      const result = await lookupNode(value);
+      if (result?.callsign) {
+        const parts = [result.callsign];
+        if (result.location) parts.push(result.location);
+        els.nodeLookupResult.textContent = parts.join(" — ");
+        els.nodeLookupResult.hidden = false;
+      }
+    } catch {
+      // Lookup failure is silent -- node may just not be in the DB
+    }
+  }, 400);
+}
+
+async function handleSectionToggle(event) {
+  const btn = event.currentTarget;
+  const bodyId = btn.getAttribute("aria-controls");
+  const body = document.getElementById(bodyId);
+  const sectionKey = btn.id.replace("toggle-", "");
+
+  if (!body) return;
+
+  const isExpanded = btn.getAttribute("aria-expanded") === "true";
+  const nowExpanded = !isExpanded;
+
+  btn.setAttribute("aria-expanded", String(nowExpanded));
+  body.hidden = !nowExpanded;
+  btn.querySelector(".toggle-icon").textContent = nowExpanded ? "▾" : "▸";
+
+  if (nowExpanded) {
+    state.collapsedSections.delete(sectionKey);
+  } else {
+    state.collapsedSections.add(sectionKey);
+  }
+
+  try {
+    await storageSet({ collapsedSections: [...state.collapsedSections] });
+  } catch {
+    // Non-critical -- collapse state just won't persist
+  }
+}
+
+function applyCollapsedSections() {
+  for (const sectionKey of state.collapsedSections) {
+    const btn = document.getElementById(`toggle-${sectionKey}`);
+    const body = document.getElementById(`${sectionKey}-body`);
+    if (btn && body) {
+      btn.setAttribute("aria-expanded", "false");
+      body.hidden = true;
+      const icon = btn.querySelector(".toggle-icon");
+      if (icon) icon.textContent = "▸";
+    }
+  }
 }
 
 window.addEventListener("beforeunload", () => {
