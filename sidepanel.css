@@ -533,3 +533,62 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ── Section toggles (collapsible) ─────────────────────────────────────────── */
+.section-toggle {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  opacity: 0.85;
+}
+
+.section-toggle:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.toggle-icon {
+  font-size: 0.75rem;
+  line-height: 1;
+  transition: transform 0.15s;
+}
+
+.section-body {
+  display: block;
+}
+
+.section-body[hidden] {
+  display: none;
+}
+
+/* ── Node lookup result ─────────────────────────────────────────────────────── */
+.node-lookup-result {
+  font-size: 0.72rem;
+  color: var(--accent);
+  margin: 0.25rem 0 0.35rem;
+  padding: 0.2rem 0.4rem;
+  border-left: 2px solid var(--accent);
+  opacity: 0.9;
+}
+
+/* ── COP controls grid ──────────────────────────────────────────────────────── */
+.cop-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.cop-grid button {
+  width: 100%;
+  font-size: 0.8rem;
+  padding: 0.45rem 0.5rem;
+}
