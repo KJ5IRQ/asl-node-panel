@@ -9,7 +9,8 @@ export const STORAGE_KEYS = Object.freeze({
   DTMF_MACROS: "dtmfMacros",
   SCHEDULES: "schedules",
   NODE_COUNT_WARNING: "nodeCountWarning",
-  THEME_SETTINGS: "themeSettings"
+  THEME_SETTINGS: "themeSettings",
+  SCREEN_READER: "screenReaderMode"
 });
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -21,7 +22,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   [STORAGE_KEYS.DTMF_MACROS]: [],
   [STORAGE_KEYS.SCHEDULES]: [],
   [STORAGE_KEYS.NODE_COUNT_WARNING]: 0,
-  [STORAGE_KEYS.THEME_SETTINGS]: null
+  [STORAGE_KEYS.THEME_SETTINGS]: null,
+  [STORAGE_KEYS.SCREEN_READER]: false
 });
 
 export async function getSettings() {
@@ -36,7 +38,8 @@ export async function getSettings() {
     dtmfMacros: normalizeDtmfMacros(settings.dtmfMacros),
     schedules: normalizeSchedules(settings.schedules),
     nodeCountWarning: normalizeNodeCountWarning(settings.nodeCountWarning),
-    themeSettings: settings.themeSettings ?? null
+    themeSettings: settings.themeSettings ?? null,
+    screenReaderMode: Boolean(settings.screenReaderMode)
   };
 }
 
