@@ -49,8 +49,9 @@
 
     <section class="panel-section" aria-labelledby="connect-title">
       <div class="section-title-row">
-        <h2 id="connect-title">Connect Node</h2>
+        <button class="section-toggle" id="toggle-connect" aria-expanded="true" aria-controls="connect-body">Connect Node <span class="toggle-icon">▾</span></button>
       </div>
+      <div class="section-body" id="connect-body">
 
       <form id="connectForm" class="connect-form">
         <label class="sr-only" for="connectNodeInput">Node number</label>
@@ -63,6 +64,8 @@
           spellcheck="false"
         />
 
+        <div id="nodeLookupResult" class="node-lookup-result" hidden></div>
+
         <div class="button-row">
           <button id="connectTransceive" type="submit" data-connect-mode="transceive">
             Connect T
@@ -73,28 +76,31 @@
           </button>
         </div>
       </form>
+      </div>
     </section>
 
     <section class="panel-section" aria-labelledby="favorites-title">
       <div class="section-title-row">
-        <h2 id="favorites-title">Favorites</h2>
+        <button class="section-toggle" id="toggle-favorites" aria-expanded="true" aria-controls="favorites-body">Favorites <span class="toggle-icon">▾</span></button>
         <button id="refreshFavorites" class="small secondary" type="button">Refresh</button>
       </div>
+      <div class="section-body" id="favorites-body">
 
       <div id="favoritesList" class="favorites-list" aria-live="polite">
         <div class="empty-state">No favorites configured.</div>
+      </div>
       </div>
     </section>
 
     <section class="panel-section connected-section" aria-labelledby="connected-title">
       <div class="section-title-row">
-        <h2 id="connected-title">Connected Nodes</h2>
-
+        <button class="section-toggle" id="toggle-connected" aria-expanded="true" aria-controls="connected-body">Connected Nodes <span class="toggle-icon">▾</span></button>
         <div class="section-actions">
           <button id="refreshStatus" class="small secondary" type="button">Refresh</button>
           <button id="disconnectAll" class="small danger" type="button">Disconnect All</button>
         </div>
       </div>
+      <div class="section-body" id="connected-body">
 
       <div id="busyMessage" class="busy-message" hidden>
         <span class="spinner" aria-hidden="true"></span>
@@ -104,12 +110,28 @@
       <div id="connectedNodesList" class="connected-nodes-list" aria-live="polite">
         <div class="empty-state">No connected nodes loaded yet.</div>
       </div>
+      </div>
+    </section>
+
+    <section class="panel-section" aria-labelledby="cop-title">
+      <div class="section-title-row">
+        <button class="section-toggle" id="toggle-cop" aria-expanded="true" aria-controls="cop-body">COP Controls <span class="toggle-icon">▾</span></button>
+      </div>
+      <div class="section-body" id="cop-body">
+        <div class="cop-grid">
+          <button id="copIdentify" type="button">Identify</button>
+          <button id="copTime" type="button" class="secondary">Time</button>
+          <button id="copStatus" type="button" class="secondary">Status</button>
+          <button id="copVersion" type="button" class="secondary">Version</button>
+        </div>
+      </div>
     </section>
 
     <section class="panel-section" aria-labelledby="dtmf-title">
       <div class="section-title-row">
-        <h2 id="dtmf-title">DTMF</h2>
+        <button class="section-toggle" id="toggle-dtmf" aria-expanded="true" aria-controls="dtmf-body">DTMF <span class="toggle-icon">▾</span></button>
       </div>
+      <div class="section-body" id="dtmf-body">
 
       <form id="dtmfForm" class="dtmf-form">
         <label class="sr-only" for="dtmfInput">DTMF sequence</label>
@@ -129,16 +151,19 @@
       <p class="hint">
         DTMF requests are sent with <code>confirmed: true</code>.
       </p>
+      </div>
     </section>
 
     <section class="panel-section audit-section" aria-labelledby="audit-title">
       <div class="section-title-row">
-        <h2 id="audit-title">Audit Log</h2>
+        <button class="section-toggle" id="toggle-audit" aria-expanded="true" aria-controls="audit-body">Audit Log <span class="toggle-icon">▾</span></button>
         <button id="refreshAudit" class="small secondary" type="button">Refresh</button>
       </div>
+      <div class="section-body" id="audit-body">
 
       <div id="auditLog" class="audit-log" aria-live="polite">
         <div class="empty-state">No audit entries loaded yet.</div>
+      </div>
       </div>
     </section>
 
