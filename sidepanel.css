@@ -1015,3 +1015,16 @@ code { color: var(--accent); font-family: var(--font-mono); }
   .connected-node-item { grid-template-columns: 1fr auto; }
   .connected-node-item .node-info { grid-column: 1 / -1; }
 }
+
+/* ── Header actions (mode toggle + settings) ─────────────────────────────────── */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.mode-toggle-btn {
+  font-size: 1rem;
+  line-height: 1;
+}
