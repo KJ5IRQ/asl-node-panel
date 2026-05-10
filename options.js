@@ -136,7 +136,7 @@
     }
   }
 
-  function handleAddFavorite() {
+  async function handleAddFavorite() {
     const node = els.favoriteNode.value.trim();
     const label = els.favoriteLabel.value.trim();
 
@@ -156,10 +156,8 @@
 
     if (existingIndex >= 0) {
       state.favorites[existingIndex] = favorite;
-      setStatus("Favorite updated. Click Save Settings to persist.", "warning");
     } else {
       state.favorites.push(favorite);
-      setStatus("Favorite added. Click Save Settings to persist.", "warning");
     }
 
     state.favorites.sort((a, b) => Number(a.node) - Number(b.node));
@@ -169,9 +167,18 @@
     els.favoriteNode.focus();
 
     renderFavorites();
+
+    try {
+      await storageSet({ favorites: sanitizeFavorites(state.favorites) });
+      notifyPanelFavoritesChanged();
+      setStatus("Favorite saved.", "success", 2000);
+    } catch (error) {
+      console.error(error);
+      setStatus(`Failed to save favorite: ${error.message}`, "error");
+    }
   }
 
-  function handleFavoritesListClick(event) {
+  async function handleFavoritesListClick(event) {
     const removeButton = event.target.closest("[data-remove-index]");
 
     if (!removeButton) {
@@ -187,7 +194,14 @@
     state.favorites.splice(index, 1);
     renderFavorites();
 
-    setStatus("Favorite removed. Click Save Settings to persist.", "warning");
+    try {
+      await storageSet({ favorites: sanitizeFavorites(state.favorites) });
+      notifyPanelFavoritesChanged();
+      setStatus("Favorite removed.", "success", 2000);
+    } catch (error) {
+      console.error(error);
+      setStatus(`Failed to remove favorite: ${error.message}`, "error");
+    }
   }
 
   function validateSettings() {
@@ -448,4 +462,12 @@
       Boolean(chrome.permissions.contains)
     );
   }
+  function notifyPanelFavoritesChanged() {
+    if (typeof chrome !== "undefined" && chrome.runtime) {
+      chrome.runtime.sendMessage({ type: "FAVORITES_CHANGED" }).catch(() => {
+        // Panel may not be open -- ignore.
+      });
+    }
+  }
+
 })();
