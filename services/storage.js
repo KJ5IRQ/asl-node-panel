@@ -3,13 +3,17 @@
 export const STORAGE_KEYS = Object.freeze({
   BASE_URL: "baseUrl",
   API_KEY: "apiKey",
-  FAVORITES: "favorites"
+  FAVORITES: "favorites",
+  REFRESH_INTERVAL: "refreshInterval",
+  COLLAPSED_SECTIONS: "collapsedSections"
 });
 
 export const DEFAULT_SETTINGS = Object.freeze({
   [STORAGE_KEYS.BASE_URL]: "",
   [STORAGE_KEYS.API_KEY]: "",
-  [STORAGE_KEYS.FAVORITES]: []
+  [STORAGE_KEYS.FAVORITES]: [],
+  [STORAGE_KEYS.REFRESH_INTERVAL]: 15,
+  [STORAGE_KEYS.COLLAPSED_SECTIONS]: []
 });
 
 export async function getSettings() {
@@ -18,7 +22,9 @@ export async function getSettings() {
   return {
     baseUrl: normalizeStoredBaseUrl(settings.baseUrl),
     apiKey: normalizeStoredApiKey(settings.apiKey),
-    favorites: sanitizeFavorites(settings.favorites)
+    favorites: sanitizeFavorites(settings.favorites),
+    refreshInterval: normalizeRefreshInterval(settings.refreshInterval),
+    collapsedSections: normalizeCollapsedSections(settings.collapsedSections)
   };
 }
 
@@ -28,7 +34,9 @@ export async function saveSettings(settings) {
   await storageSet({
     [STORAGE_KEYS.BASE_URL]: normalized.baseUrl,
     [STORAGE_KEYS.API_KEY]: normalized.apiKey,
-    [STORAGE_KEYS.FAVORITES]: normalized.favorites
+    [STORAGE_KEYS.FAVORITES]: normalized.favorites,
+    [STORAGE_KEYS.REFRESH_INTERVAL]: normalized.refreshInterval,
+    [STORAGE_KEYS.COLLAPSED_SECTIONS]: normalized.collapsedSections
   });
 
   return normalized;
@@ -116,7 +124,9 @@ export function normalizeSettings(settings = {}) {
   return {
     baseUrl: normalizeBaseUrl(settings.baseUrl),
     apiKey: normalizeApiKey(settings.apiKey),
-    favorites: sanitizeFavorites(settings.favorites)
+    favorites: sanitizeFavorites(settings.favorites),
+    refreshInterval: normalizeRefreshInterval(settings.refreshInterval),
+    collapsedSections: normalizeCollapsedSections(settings.collapsedSections)
   };
 }
 
@@ -240,7 +250,7 @@ function sortFavorites(favorites) {
   return [...favorites].sort((a, b) => Number(a.node) - Number(b.node));
 }
 
-function storageGet(defaults) {
+export function storageGet(defaults) {
   return new Promise((resolve, reject) => {
     if (!hasChromeStorageApi()) {
       reject(new Error("chrome.storage.sync is not available."));
@@ -260,7 +270,7 @@ function storageGet(defaults) {
   });
 }
 
-function storageSet(values) {
+export function storageSet(values) {
   return new Promise((resolve, reject) => {
     if (!hasChromeStorageApi()) {
       reject(new Error("chrome.storage.sync is not available."));
@@ -306,4 +316,17 @@ function hasChromeStorageApi() {
     Boolean(chrome.storage) &&
     Boolean(chrome.storage.sync)
   );
+}
+
+export function normalizeRefreshInterval(value) {
+  const valid = [5, 15, 30, 60];
+  const parsed = Number(value);
+  return valid.includes(parsed) ? parsed : 15;
+}
+
+export function normalizeCollapsedSections(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((s) => typeof s === "string");
 }
