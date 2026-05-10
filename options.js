@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEYS = ["baseUrl", "apiKey", "favorites", "refreshInterval", "collapsedSections", "dtmfMacros", "schedules", "nodeCountWarning", "themeSettings"];
+  const STORAGE_KEYS = ["baseUrl", "apiKey", "favorites", "refreshInterval", "collapsedSections", "dtmfMacros", "schedules", "nodeCountWarning", "themeSettings", "screenReaderMode"];
 
   const DEFAULT_SETTINGS = {
     baseUrl: "",
@@ -12,7 +12,8 @@
     dtmfMacros: [],
     schedules: [],
     nodeCountWarning: 0,
-    themeSettings: null
+    themeSettings: null,
+    screenReaderMode: false
   };
 
   const state = {
@@ -20,6 +21,7 @@
     dtmfMacros: [],
     schedules: [],
     themeSettings: { preset: "system", mode: "dark", customColors: {} },
+    screenReaderMode: false,
     statusTimer: null
   };
 
@@ -57,6 +59,7 @@
     els.dayPicker = document.getElementById("dayPicker");
     els.addSchedule = document.getElementById("addSchedule");
     els.schedulesList = document.getElementById("schedulesList");
+    els.screenReaderMode = document.getElementById("screenReaderMode");
     els.themePreset = document.getElementById("themePreset");
     els.themeDark = document.getElementById("themeDark");
     els.themeLight = document.getElementById("themeLight");
@@ -82,6 +85,7 @@
     els.schedulesList.addEventListener("click", handleSchedulesListClick);
     populateTimeSelects();
     buildColorPickerGrid();
+    if (els.screenReaderMode) els.screenReaderMode.addEventListener("change", handleScreenReaderToggle);
     els.themePreset.addEventListener("change", handleThemeChange);
     els.themeDark.addEventListener("change", handleThemeChange);
     els.themeLight.addEventListener("change", handleThemeChange);
@@ -106,6 +110,11 @@
       state.dtmfMacros = Array.isArray(settings.dtmfMacros) ? settings.dtmfMacros : [];
       state.schedules = Array.isArray(settings.schedules) ? settings.schedules : [];
       state.themeSettings = settings.themeSettings || { preset: "system", mode: "dark", customColors: {} };
+      state.screenReaderMode = Boolean(settings.screenReaderMode);
+      if (els.screenReaderMode) {
+        els.screenReaderMode.checked = state.screenReaderMode;
+        els.screenReaderMode.setAttribute("aria-checked", String(state.screenReaderMode));
+      }
       renderMacros();
       renderSchedules();
       loadThemeUI();
@@ -141,7 +150,8 @@
         dtmfMacros: validated.dtmfMacros,
         schedules: validated.schedules,
         nodeCountWarning: validated.nodeCountWarning,
-        themeSettings: validated.themeSettings
+        themeSettings: validated.themeSettings,
+        screenReaderMode: validated.screenReaderMode
       });
 
       setStatus("Settings saved.", "success", 2000);
@@ -287,7 +297,8 @@
       dtmfMacros: state.dtmfMacros,
       schedules: state.schedules,
       nodeCountWarning: Math.max(0, Number(els.nodeCountWarning?.value) || 0),
-      themeSettings: state.themeSettings
+      themeSettings: state.themeSettings,
+      screenReaderMode: Boolean(els.screenReaderMode?.checked)
     };
   }
 
@@ -870,6 +881,22 @@
     if (txt) txt.style.color = colors.text || "#e2e8f0";
     if (mut) mut.style.color = colors.amber || "#38bdf8";
     if (acc) acc.style.color = colors.accent || "#38bdf8";
+  }
+
+
+  async function handleScreenReaderToggle() {
+    const enabled = Boolean(els.screenReaderMode?.checked);
+    state.screenReaderMode = enabled;
+    if (els.screenReaderMode) {
+      els.screenReaderMode.setAttribute("aria-checked", String(enabled));
+    }
+    await storageSet({ screenReaderMode: enabled });
+    chrome.runtime.sendMessage({ type: "FAVORITES_CHANGED" }).catch(() => {});
+    setStatus(
+      enabled ? "Screen reader mode enabled. Reload the panel to apply." : "Screen reader mode disabled.",
+      "success",
+      3000
+    );
   }
 
 })();
