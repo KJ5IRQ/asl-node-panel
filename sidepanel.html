@@ -44,10 +44,19 @@
           <span class="summary-label">Connected</span>
           <strong id="statusConnectedCount">—</strong>
         </div>
+      <div class="summary-card">
+          <span class="summary-label">Uptime</span>
+          <strong id="statusUptime">—</strong>
+        </div>
         <div class="summary-card keyed-card">
           <span id="statusRxKeyed" class="keyed-badge"></span>
         </div>
       </section>
+      <div class="node-stats-row">
+        <div class="stat-pill"><span class="stat-label">TX Today</span><span id="statusTxToday">—</span></div>
+        <div class="stat-pill"><span class="stat-label">TX Total</span><span id="statusTxTotal">—</span></div>
+        <div id="nodeCountWarningBadge" class="node-count-warning" hidden>⚠ HIGH CONN</div>
+      </div>
     </header>
 
     <section class="panel-section" aria-labelledby="connect-title">
@@ -135,6 +144,7 @@
         <button class="section-toggle" id="toggle-dtmf" aria-expanded="true" aria-controls="dtmf-body">DTMF <span class="toggle-icon">▾</span></button>
       </div>
       <div class="section-body" id="dtmf-body">
+        <div id="dtmfMacrosGrid" class="dtmf-macros-grid"></div>
 
       <form id="dtmfForm" class="dtmf-form">
         <label class="sr-only" for="dtmfInput">DTMF sequence</label>
@@ -170,6 +180,7 @@
       </div>
     </section>
 
+    <div id="scheduleIndicator" class="schedule-indicator" hidden></div>
     <footer class="footer-status">
       <span id="footerMessage" role="status" aria-live="polite"></span>
     </footer>
