@@ -12,7 +12,7 @@
 </head>
 
 <body>
-  <main class="app-shell">
+  <main class="app-shell" role="main">
     <header class="status-header" aria-labelledby="app-title">
       <div class="title-row">
         <div>
@@ -32,27 +32,27 @@
 
       <section class="node-summary" aria-label="Node status summary">
         <div class="summary-card">
-          <span class="summary-label">Node</span>
-          <strong id="statusNode">—</strong>
+          <span class="summary-label" id="lbl-node">Node</span>
+          <strong id="statusNode" aria-labelledby="lbl-node">—</strong>
         </div>
 
         <div class="summary-card">
-          <span class="summary-label">Callsign</span>
-          <strong id="statusCallsign">—</strong>
+          <span class="summary-label" id="lbl-callsign">Callsign</span>
+          <strong id="statusCallsign" aria-labelledby="lbl-callsign">—</strong>
         </div>
 
         <div class="summary-card">
-          <span class="summary-label">Keyups Today</span>
-          <strong id="statusKeyups">—</strong>
+          <span class="summary-label" id="lbl-keyups">Keyups Today</span>
+          <strong id="statusKeyups" aria-labelledby="lbl-keyups">—</strong>
         </div>
 
         <div class="summary-card">
-          <span class="summary-label">Connected</span>
-          <strong id="statusConnectedCount">—</strong>
+          <span class="summary-label" id="lbl-connected">Connected Nodes</span>
+          <strong id="statusConnectedCount" aria-labelledby="lbl-connected">—</strong>
         </div>
       <div class="summary-card">
-          <span class="summary-label">Uptime</span>
-          <strong id="statusUptime">—</strong>
+          <span class="summary-label" id="lbl-uptime">Uptime</span>
+          <strong id="statusUptime" aria-labelledby="lbl-uptime">—</strong>
         </div>
         <div class="summary-card keyed-card">
           <span id="statusRxKeyed" class="keyed-badge"></span>
@@ -71,7 +71,7 @@
       </div>
       <div class="section-body" id="connect-body">
 
-      <form id="connectForm" class="connect-form">
+      <form id="connectForm" class="connect-form" aria-label="Connect to a node">
         <label class="sr-only" for="connectNodeInput">Node number</label>
         <input
           id="connectNodeInput"
@@ -131,7 +131,7 @@
       </div>
     </section>
 
-    <section class="panel-section" aria-labelledby="cop-title">
+    <section class="panel-section" aria-labelledby="cop-title" aria-label="Courtesy-operation-position controls">
       <div class="section-title-row">
         <button class="section-toggle" id="toggle-cop" aria-expanded="true" aria-controls="cop-body">COP Controls <span class="toggle-icon">▾</span></button>
       </div>
@@ -152,7 +152,7 @@
       <div class="section-body" id="dtmf-body">
         <div id="dtmfMacrosGrid" class="dtmf-macros-grid"></div>
 
-      <form id="dtmfForm" class="dtmf-form">
+      <form id="dtmfForm" class="dtmf-form" aria-label="Send DTMF sequence">
         <label class="sr-only" for="dtmfInput">DTMF sequence</label>
         <input
           id="dtmfInput"
@@ -187,6 +187,8 @@
     </section>
 
     <div id="scheduleIndicator" class="schedule-indicator" hidden></div>
+    <div id="srAnnouncer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+    <div id="srAnnouncerAssertive" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
     <footer class="footer-status">
       <span id="footerMessage" role="status" aria-live="polite"></span>
     </footer>
