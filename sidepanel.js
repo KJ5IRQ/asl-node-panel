@@ -33,6 +33,7 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   bindElements();
   bindEvents();
+  bindMessages();
 
   await loadInitialState();
   startAutoRefresh();
@@ -96,6 +97,16 @@ function bindEvents() {
     event.preventDefault();
     handleSendDtmf();
   });
+}
+
+function bindMessages() {
+  if (typeof chrome !== "undefined" && chrome.runtime) {
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === "FAVORITES_CHANGED") {
+        handleRefreshFavorites();
+      }
+    });
+  }
 }
 
 async function loadInitialState() {
