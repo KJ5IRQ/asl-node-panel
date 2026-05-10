@@ -1,7 +1,6 @@
 "use strict";
 
-import { getSettings, isConfigured } from "./services/storage.js";
-import { storageSet } from "./services/storage.js";
+import { getSettings, isConfigured, storageSet } from "./services/storage.js";
 import {
   getStatus,
   getConnectedNodes,
