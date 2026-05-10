@@ -1,6 +1,7 @@
 "use strict";
 
 import { getSettings, isConfigured, storageSet, normalizeSchedules } from "./services/storage.js";
+import { loadAndApplyTheme, applyTheme, watchThemeChanges } from "./services/theme.js";
 import {
   getStatus,
   getConnectedNodes,
@@ -40,6 +41,8 @@ const els = {};
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
+  await loadAndApplyTheme();
+  watchThemeChanges();
   bindElements();
   bindEvents();
   bindMessages();
@@ -137,6 +140,12 @@ function bindEvents() {
 function bindMessages() {
   if (typeof chrome !== "undefined" && chrome.runtime) {
     chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === "THEME_CHANGED") {
+        chrome.storage.sync.get({ themeSettings: null }, (result) => {
+          applyTheme(result.themeSettings);
+        });
+        return;
+      }
       if (message?.type === "FAVORITES_CHANGED") {
         handleRefreshFavorites();
         loadSettingsIntoState().then(() => {
