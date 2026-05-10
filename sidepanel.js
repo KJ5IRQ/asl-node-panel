@@ -242,7 +242,8 @@ function handleDisconnectAll() {
   runTimedOperation({
     busyText: "Disconnecting all nodes…",
     action: () => disconnectAll(),
-    successMessage: "Disconnect-all request sent."
+    successMessage: "Disconnect-all request sent.",
+    postDelayMs: 3000
   });
 }
 
@@ -259,7 +260,7 @@ function handleSendDtmf() {
   });
 }
 
-async function runTimedOperation({ busyText, action, successMessage }) {
+async function runTimedOperation({ busyText, action, successMessage, postDelayMs = 0 }) {
   if (state.busy) {
     return;
   }
@@ -273,6 +274,9 @@ async function runTimedOperation({ busyText, action, successMessage }) {
 
   try {
     await action();
+    if (postDelayMs > 0) {
+      await sleep(postDelayMs);
+    }
     await refreshAll({ manual: false, force: true, silent: true });
     setFooter(successMessage, "success", 3000);
   } catch (error) {
