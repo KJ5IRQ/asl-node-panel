@@ -687,3 +687,188 @@ code {
   .connected-node-item { grid-template-columns: 1fr auto; }
   .connected-node-item .node-info { grid-column: 1 / -1; }
 }
+
+/* ── Feature 4: Node stats row ──────────────────────────────────────────────── */
+.node-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  flex-wrap: wrap;
+}
+
+.stat-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  background: var(--panel-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-size: 0.68rem;
+}
+
+.stat-label {
+  color: var(--faint);
+  font-family: var(--font-head);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stat-pill span:last-child {
+  color: var(--khaki);
+  font-family: var(--font-mono);
+}
+
+/* ── Feature 5: Node count warning badge ────────────────────────────────────── */
+.node-count-warning {
+  margin-left: auto;
+  padding: 3px 8px;
+  background: var(--warning);
+  color: #0a0600;
+  font-family: var(--font-head);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  border-radius: var(--radius-sm);
+  animation: pulse-key 1s ease-in-out infinite;
+}
+
+/* ── Feature 3: DTMF macros grid ────────────────────────────────────────────── */
+.dtmf-macros-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-bottom: 7px;
+}
+
+.macro-btn {
+  font-size: 0.72rem;
+  padding: 5px 4px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Feature 2: Favorites live status ───────────────────────────────────────── */
+.favorite-status {
+  grid-column: 1 / -1;
+  font-size: 0.65rem;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding-top: 2px;
+  border-top: 1px solid var(--border-soft);
+  margin-top: 3px;
+}
+
+.favorite-status.keyed {
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.favorite-status.offline {
+  color: var(--danger-text);
+  opacity: 0.7;
+}
+
+/* ── Feature 1: Schedule indicator ─────────────────────────────────────────── */
+.schedule-indicator {
+  margin: 0 10px 4px;
+  padding: 4px 8px;
+  background: var(--panel-inset);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--olive-bright);
+  border-radius: var(--radius-sm);
+  font-size: 0.68rem;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+
+/* ── Options page: new section styles ───────────────────────────────────────── */
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.field-row input,
+.field-row select {
+  flex: 1;
+  min-width: 80px;
+}
+
+.field-row button {
+  flex-shrink: 0;
+}
+
+.field-sep {
+  color: var(--muted);
+  font-size: 1rem;
+  font-family: var(--font-mono);
+}
+
+.field-hint-inline {
+  color: var(--faint);
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.day-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.day-picker label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.item-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--panel-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  flex-wrap: wrap;
+}
+
+.item-row.disabled {
+  opacity: 0.5;
+}
+
+.item-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-value {
+  color: var(--khaki);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
