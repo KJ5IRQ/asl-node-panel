@@ -147,6 +147,14 @@ function bindEvents() {
 function bindMessages() {
   if (typeof chrome !== "undefined" && chrome.runtime) {
     chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === "A11Y_CHANGED") {
+        state.screenReaderMode = Boolean(message.screenReaderMode);
+        applyAccessibilityMode();
+        if (state.screenReaderMode) {
+          announce("Screen reader mode enabled.", "polite");
+        }
+        return;
+      }
       if (message?.type === "THEME_CHANGED") {
         chrome.storage.sync.get({ themeSettings: null }, (result) => {
           applyTheme(result.themeSettings);
@@ -161,6 +169,21 @@ function bindMessages() {
           renderScheduleIndicator();
           applyAccessibilityMode();
         }).catch(console.error);
+      }
+    });
+  }
+
+  // Watch storage directly for screenReaderMode changes -- more reliable
+  // than runtime messages which can be missed if panel isn't focused
+  if (typeof chrome !== "undefined" && chrome.storage) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "sync") return;
+      if (changes.screenReaderMode !== undefined) {
+        state.screenReaderMode = Boolean(changes.screenReaderMode.newValue);
+        applyAccessibilityMode();
+        if (state.screenReaderMode) {
+          announce("Screen reader mode enabled.", "polite");
+        }
       }
     });
   }
