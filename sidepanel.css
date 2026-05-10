@@ -1066,26 +1066,33 @@ code { color: var(--accent); font-family: var(--font-mono); }
   color: var(--color-success, #4caf50);
 }
 
-/* ── TX keyed badge ──────────────────────────────────────── */
+/* ── RX / TX keyed badges -- always visible, lit when active ── */
+.keyed-badge.rx,
 .keyed-badge.tx {
-  background: transparent;
-  color: transparent;
-  transition: background 0.15s, color 0.15s;
-}
-
-.keyed-badge.tx.active {
-  background: var(--color-warning, #f59e0b);
-  color: var(--color-on-warning, #000);
+  display: inline-block;
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.05em;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+  opacity: 0.25;
+  background: #444;
+  color: #888;
 }
 
+/* RX active -- green (receiving signal) */
 .keyed-badge.rx.active {
-  background: var(--color-danger, #ef4444);
-  color: #fff;
+  background: #22c55e;
+  color: #000;
+  opacity: 1;
+}
+
+/* TX active -- amber (transmitting) */
+.keyed-badge.tx.active {
+  background: #f59e0b;
+  color: #000;
+  opacity: 1;
 }
 
 .keyed-card {
