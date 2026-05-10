@@ -872,3 +872,42 @@ code {
   font-size: 0.75rem;
   white-space: nowrap;
 }
+
+/* ── System default light mode ──────────────────────────────────────────────── */
+@media (prefers-color-scheme: light) {
+  :root:not([data-color-scheme="dark"]) {
+    color-scheme: light;
+    --bg:           #f8f9fa;
+    --panel:        #ffffff;
+    --panel-soft:   #f0f2f5;
+    --panel-strong: #e8ebf0;
+    --panel-inset:  #eef0f3;
+    --text:         #1a1d23;
+    --text-bright:  #0d0f12;
+    --muted:        #6b7280;
+    --faint:        #9ca3af;
+    --border:       #d1d5db;
+    --border-bright:#b0b7c3;
+    --border-soft:  rgba(100, 110, 130, 0.18);
+    --olive:        #4a5228;
+    --olive-bright: #5c6630;
+    --olive-dark:   #343a1c;
+    --khaki:        #5a6030;
+    --amber:        #92620a;
+    --amber-dim:    #7a5008;
+    --success:      #166534;
+    --success-text: #14532d;
+    --warning:      #92400e;
+    --warning-text: #78350f;
+    --danger:       #991b1b;
+    --danger-text:  #7f1d1d;
+    --danger-border:rgba(153, 27, 27, 0.35);
+    --input:        #ffffff;
+    --shadow:       rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* ── Explicit light mode (set by theme engine) ───────────────────────────────── */
+:root[data-color-scheme="light"] {
+  color-scheme: light;
+}
