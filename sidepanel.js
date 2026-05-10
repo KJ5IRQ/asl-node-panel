@@ -260,7 +260,7 @@ function handleSendDtmf() {
   });
 }
 
-async function runTimedOperation({ busyText, action, successMessage }) {
+async async function runTimedOperation({ busyText, action, successMessage }) {
   if (state.busy) {
     return;
   }
@@ -284,7 +284,7 @@ async function runTimedOperation({ busyText, action, successMessage }) {
   }
 }
 
-async function runImmediateOperation({ busyText, action, successMessage }) {
+async async function runImmediateOperation({ busyText, action, successMessage }) {
   if (state.busy) {
     return;
   }
