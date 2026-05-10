@@ -427,6 +427,23 @@
       </div>
     </section>
 
+    <section aria-labelledby="a11y-title">
+      <h2 id="a11y-title">Accessibility</h2>
+
+      <div class="field-group">
+        <label class="toggle-label" for="screenReaderMode">
+          <span>Screen Reader Mode</span>
+          <input type="checkbox" id="screenReaderMode" role="switch" aria-checked="false" />
+        </label>
+        <p class="hint">
+          When enabled: status changes and alerts are announced to screen readers
+          via ARIA live regions, all interactive elements have enhanced focus indicators,
+          and touch targets are enlarged. Recommended for users of NVDA, JAWS, VoiceOver,
+          or ChromeVox. This setting persists and applies to both the panel and settings page.
+        </p>
+      </div>
+    </section>
+
     <section aria-labelledby="storage-title">
       <h2 id="storage-title">Storage</h2>
 
@@ -450,6 +467,11 @@
   </main>
 
   <script type="module" src="services/theme.js"></script>
+  <script type="module">
+    import { loadAndApplyTheme, watchThemeChanges } from "./services/theme.js";
+    loadAndApplyTheme();
+    watchThemeChanges();
+  </script>
   <script src="options.js"></script>
 </body>
 </html>
