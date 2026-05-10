@@ -145,7 +145,8 @@ export function normalizeSettings(settings = {}) {
     dtmfMacros: normalizeDtmfMacros(settings.dtmfMacros),
     schedules: normalizeSchedules(settings.schedules),
     nodeCountWarning: normalizeNodeCountWarning(settings.nodeCountWarning),
-    themeSettings: settings.themeSettings ?? null
+    themeSettings: settings.themeSettings ?? null,
+    screenReaderMode: Boolean(settings.screenReaderMode)
   };
 }
 
