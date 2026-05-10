@@ -892,6 +892,7 @@
     }
     await storageSet({ screenReaderMode: enabled });
     chrome.runtime.sendMessage({ type: "FAVORITES_CHANGED" }).catch(() => {});
+    chrome.runtime.sendMessage({ type: "A11Y_CHANGED", screenReaderMode: enabled }).catch(() => {});
     setStatus(
       enabled ? "Screen reader mode enabled. Reload the panel to apply." : "Screen reader mode disabled.",
       "success",
