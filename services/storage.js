@@ -8,7 +8,8 @@ export const STORAGE_KEYS = Object.freeze({
   COLLAPSED_SECTIONS: "collapsedSections",
   DTMF_MACROS: "dtmfMacros",
   SCHEDULES: "schedules",
-  NODE_COUNT_WARNING: "nodeCountWarning"
+  NODE_COUNT_WARNING: "nodeCountWarning",
+  THEME_SETTINGS: "themeSettings"
 });
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -19,7 +20,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   [STORAGE_KEYS.COLLAPSED_SECTIONS]: [],
   [STORAGE_KEYS.DTMF_MACROS]: [],
   [STORAGE_KEYS.SCHEDULES]: [],
-  [STORAGE_KEYS.NODE_COUNT_WARNING]: 0
+  [STORAGE_KEYS.NODE_COUNT_WARNING]: 0,
+  [STORAGE_KEYS.THEME_SETTINGS]: null
 });
 
 export async function getSettings() {
@@ -33,7 +35,8 @@ export async function getSettings() {
     collapsedSections: normalizeCollapsedSections(settings.collapsedSections),
     dtmfMacros: normalizeDtmfMacros(settings.dtmfMacros),
     schedules: normalizeSchedules(settings.schedules),
-    nodeCountWarning: normalizeNodeCountWarning(settings.nodeCountWarning)
+    nodeCountWarning: normalizeNodeCountWarning(settings.nodeCountWarning),
+    themeSettings: settings.themeSettings ?? null
   };
 }
 
@@ -138,7 +141,8 @@ export function normalizeSettings(settings = {}) {
     collapsedSections: normalizeCollapsedSections(settings.collapsedSections),
     dtmfMacros: normalizeDtmfMacros(settings.dtmfMacros),
     schedules: normalizeSchedules(settings.schedules),
-    nodeCountWarning: normalizeNodeCountWarning(settings.nodeCountWarning)
+    nodeCountWarning: normalizeNodeCountWarning(settings.nodeCountWarning),
+    themeSettings: settings.themeSettings ?? null
   };
 }
 
