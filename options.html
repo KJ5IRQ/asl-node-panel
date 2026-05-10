@@ -213,6 +213,7 @@
       color: var(--accent);
     }
   </style>
+  <link rel="stylesheet" href="options.css" />
 </head>
 
 <body>
@@ -299,6 +300,57 @@
       <div id="favoritesList" class="favorites-list">
         <div class="empty-state">No favorite nodes saved yet.</div>
       </div>
+    </section>
+
+    <section aria-labelledby="theme-title">
+      <h2 id="theme-title">Theme</h2>
+
+      <div class="field-group">
+        <label for="themePreset">Preset</label>
+        <select id="themePreset">
+          <option value="system">System Default</option>
+          <option value="sigcorps">Signal Corps</option>
+          <option value="navy">Dark Navy</option>
+          <option value="slate">Slate</option>
+          <option value="highcontrast">High Contrast</option>
+          <option value="desert">Desert Sand</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+
+      <div class="field-group" id="themeModeGroup">
+        <label for="themeMode">Mode</label>
+        <div class="mode-toggle">
+          <label class="mode-option">
+            <input type="radio" name="themeMode" id="themeDark" value="dark" checked />
+            <span>Dark</span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="themeMode" id="themeLight" value="light" />
+            <span>Light</span>
+          </label>
+        </div>
+      </div>
+
+      <div id="customColorsSection" class="custom-colors" hidden>
+        <p class="hint">Customize the 10 key colors. Changes preview live.</p>
+        <div id="colorPickerGrid" class="color-picker-grid"></div>
+        <button id="resetCustomColors" type="button" class="secondary">Reset to Preset Defaults</button>
+      </div>
+
+      <div class="theme-preview" id="themePreview">
+        <div class="preview-bar"></div>
+        <div class="preview-panel">
+          <div class="preview-text">Node Panel Preview</div>
+          <div class="preview-muted">KJ5IRQ · 637050</div>
+          <div class="preview-badges">
+            <span class="preview-badge success">T</span>
+            <span class="preview-badge warning">R</span>
+            <span class="preview-accent">Connected</span>
+          </div>
+        </div>
+      </div>
+
     </section>
 
     <section aria-labelledby="dtmf-macros-title">
@@ -396,6 +448,7 @@
     </section>
   </main>
 
+  <script type="module" src="services/theme.js"></script>
   <script src="options.js"></script>
 </body>
 </html>
