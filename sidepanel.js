@@ -1,6 +1,6 @@
 "use strict";
 
-import { getSettings, isConfigured, storageSet } from "./services/storage.js";
+import { getSettings, isConfigured, storageSet, normalizeSchedules } from "./services/storage.js";
 import {
   getStatus,
   getConnectedNodes,
@@ -29,7 +29,10 @@ const state = {
   busy: false,
   refreshTimer: null,
   footerTimer: null,
-  collapsedSections: new Set()
+  collapsedSections: new Set(),
+  dtmfMacros: [],
+  schedules: [],
+  nodeCountWarning: 0
 };
 
 const els = {};
@@ -43,6 +46,9 @@ async function init() {
 
   await loadInitialState();
   applyCollapsedSections();
+  renderDtmfMacros();
+  renderScheduleIndicator();
+  startScheduleChecker();
   startAutoRefresh();
 }
 
@@ -56,6 +62,12 @@ function bindElements() {
   els.statusConnectedCount = requireElement("statusConnectedCount");
   els.statusRxKeyed = requireElement("statusRxKeyed");
   els.nodeLookupResult = requireElement("nodeLookupResult");
+  els.statusUptime = requireElement("statusUptime");
+  els.statusTxToday = requireElement("statusTxToday");
+  els.statusTxTotal = requireElement("statusTxTotal");
+  els.nodeCountWarningBadge = requireElement("nodeCountWarningBadge");
+  els.dtmfMacrosGrid = requireElement("dtmfMacrosGrid");
+  els.scheduleIndicator = requireElement("scheduleIndicator");
   els.copIdentify = requireElement("copIdentify");
   els.copTime = requireElement("copTime");
   els.copStatus = requireElement("copStatus");
@@ -127,6 +139,10 @@ function bindMessages() {
     chrome.runtime.onMessage.addListener((message) => {
       if (message?.type === "FAVORITES_CHANGED") {
         handleRefreshFavorites();
+        loadSettingsIntoState().then(() => {
+          renderDtmfMacros();
+          renderScheduleIndicator();
+        }).catch(console.error);
       }
     });
   }
@@ -164,6 +180,9 @@ async function loadSettingsIntoState() {
   state.collapsedSections = new Set(
     Array.isArray(settings.collapsedSections) ? settings.collapsedSections : []
   );
+  state.dtmfMacros = Array.isArray(settings.dtmfMacros) ? settings.dtmfMacros : [];
+  state.schedules = normalizeSchedules(Array.isArray(settings.schedules) ? settings.schedules : []);
+  state.nodeCountWarning = Number(settings.nodeCountWarning) || 0;
 }
 
 async function handleRefreshFavorites() {
@@ -377,6 +396,7 @@ async function refreshAll(options = {}) {
   }
 
   renderStatusHeader();
+  refreshFavoritesStatus();
 
   if (hadError) {
     setConnectionStatus("Refresh error");
@@ -433,7 +453,21 @@ function renderStatusHeader() {
   els.statusCallsign.textContent = valueOrDash(status.callsign);
   els.statusKeyups.textContent = valueOrDash(status.keyups_today);
   els.statusConnectedCount.textContent = String(state.connectedCount);
+  els.statusUptime.textContent = valueOrDash(status.uptime);
+  els.statusTxToday.textContent = valueOrDash(status.tx_time_today);
+  els.statusTxTotal.textContent = valueOrDash(status.tx_time_total);
   renderKeyedIndicator();
+  renderNodeCountWarning();
+}
+
+function renderNodeCountWarning() {
+  const threshold = state.nodeCountWarning;
+  const count = state.connectedCount;
+  const over = threshold > 0 && count >= threshold;
+  els.nodeCountWarningBadge.hidden = !over;
+  if (over) {
+    els.nodeCountWarningBadge.textContent = `⚠ ${count} NODES`;
+  }
 }
 
 function renderKeyedIndicator() {
@@ -449,6 +483,10 @@ function clearStatusHeader() {
   els.statusConnectedCount.textContent = "—";
   els.statusRxKeyed.textContent = "";
   els.statusRxKeyed.className = "keyed-badge";
+  els.statusUptime.textContent = "—";
+  els.statusTxToday.textContent = "—";
+  els.statusTxTotal.textContent = "—";
+  els.nodeCountWarningBadge.hidden = true;
 }
 
 function renderFavorites() {
@@ -490,6 +528,7 @@ function renderFavorites() {
     connectR.dataset.favoriteMode = "monitor";
 
     actions.append(connectT, connectR);
+    item.dataset.favoriteNode = favorite.node;
     item.append(node, label, actions);
     els.favoritesList.appendChild(item);
   }
@@ -842,7 +881,182 @@ function applyCollapsedSections() {
   }
 }
 
+
+// ── Feature 3: DTMF Macro quick-buttons ─────────────────────────────────────
+function renderDtmfMacros() {
+  els.dtmfMacrosGrid.replaceChildren();
+
+  if (!state.dtmfMacros.length) {
+    els.dtmfMacrosGrid.hidden = true;
+    return;
+  }
+
+  els.dtmfMacrosGrid.hidden = false;
+
+  for (const macro of state.dtmfMacros) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary macro-btn";
+    btn.textContent = macro.label;
+    btn.title = macro.sequence;
+    btn.dataset.macroSequence = macro.sequence;
+    btn.addEventListener("click", () => {
+      els.dtmfInput.value = macro.sequence;
+      handleSendDtmf();
+    });
+    els.dtmfMacrosGrid.appendChild(btn);
+  }
+}
+
+// ── Feature 2: Favorites live status scanning ────────────────────────────────
+const ASL_STATS_BASE = "https://stats.allstarlink.org/api";
+let favoritesStatusCache = {};
+
+async function fetchFavoriteStats(nodeNumber) {
+  try {
+    const resp = await fetch(`${ASL_STATS_BASE}/stats/${nodeNumber}`, {
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+async function refreshFavoritesStatus() {
+  if (!state.favorites.length) return;
+
+  const results = await Promise.allSettled(
+    state.favorites.map((f) => fetchFavoriteStats(f.node))
+  );
+
+  results.forEach((result, i) => {
+    const node = state.favorites[i]?.node;
+    if (node && result.status === "fulfilled" && result.value) {
+      favoritesStatusCache[node] = result.value;
+    }
+  });
+
+  renderFavoritesStatus();
+}
+
+function renderFavoritesStatus() {
+  const items = els.favoritesList.querySelectorAll(".favorite-item");
+  items.forEach((item) => {
+    const node = item.dataset.favoriteNode;
+    if (!node) return;
+    const stats = favoritesStatusCache[node];
+    let badge = item.querySelector(".favorite-status");
+    if (!badge) {
+      badge = document.createElement("div");
+      badge.className = "favorite-status";
+      item.appendChild(badge);
+    }
+    if (stats) {
+      const count = stats.linked_count ?? stats.connectedNodes ?? stats.connections ?? "?";
+      const keyed = stats.keyed ?? stats.rxkeyed ?? false;
+      badge.textContent = `${count} linked${keyed ? " · KEYED" : ""}`;
+      badge.className = `favorite-status${keyed ? " keyed" : ""}`;
+    } else {
+      badge.textContent = "offline";
+      badge.className = "favorite-status offline";
+    }
+  });
+}
+
+// ── Feature 1: Schedule checker ──────────────────────────────────────────────
+let scheduleCheckerTimer = null;
+
+function startScheduleChecker() {
+  stopScheduleChecker();
+  scheduleCheckerTimer = window.setInterval(checkSchedules, 30000);
+  checkSchedules();
+}
+
+function stopScheduleChecker() {
+  if (scheduleCheckerTimer) {
+    window.clearInterval(scheduleCheckerTimer);
+    scheduleCheckerTimer = null;
+  }
+}
+
+function checkSchedules() {
+  if (!state.schedules.length) return;
+
+  const now = new Date();
+  const utcDay = now.getUTCDay();
+  const utcHour = now.getUTCHours();
+  const utcMinute = now.getUTCMinutes();
+
+  for (const schedule of state.schedules) {
+    if (!schedule.enabled) continue;
+    if (!schedule.days.includes(utcDay)) continue;
+    if (schedule.hour !== utcHour) continue;
+    if (Math.abs(schedule.minute - utcMinute) > 1) continue;
+
+    const key = `sched_last_${schedule.id}`;
+    const lastFired = Number(sessionStorage.getItem(key) || 0);
+    const nowMs = Date.now();
+    if (nowMs - lastFired < 90000) continue; // debounce 90s
+
+    sessionStorage.setItem(key, String(nowMs));
+    executeSchedule(schedule);
+  }
+}
+
+async function executeSchedule(schedule) {
+  if (!isReady()) return;
+
+  try {
+    if (schedule.action === "disconnect-all") {
+      await disconnectAll();
+      setFooter(`Schedule: Disconnect All fired.`, "success", 4000);
+    } else if (schedule.action === "disconnect") {
+      await disconnectAll();
+      setFooter(`Schedule: Disconnect fired.`, "success", 4000);
+    } else {
+      const monitorOnly = schedule.mode === "monitor";
+      await connectNode(schedule.node, { monitorOnly });
+      setFooter(`Schedule: Connected to ${schedule.node}.`, "success", 4000);
+    }
+    await sleep(3000);
+    await refreshAll({ manual: false, force: true, silent: true });
+  } catch (error) {
+    console.error("Schedule execution failed:", error);
+    setFooter(`Schedule failed: ${error.message}`, "error");
+  }
+}
+
+function renderScheduleIndicator() {
+  if (!state.schedules.length) {
+    els.scheduleIndicator.hidden = true;
+    return;
+  }
+
+  const enabled = state.schedules.filter((s) => s.enabled);
+  if (!enabled.length) {
+    els.scheduleIndicator.hidden = true;
+    return;
+  }
+
+  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const next = enabled
+    .map((s) => {
+      const day = DAY_NAMES[s.days[0]] || "?";
+      const time = `${String(s.hour).padStart(2,"0")}:${String(s.minute).padStart(2,"0")}`;
+      return `${s.action === "disconnect-all" ? "Disc All" : `${s.action} ${s.node}`} @ ${day} ${time}`;
+    })
+    .slice(0, 2)
+    .join(" | ");
+
+  els.scheduleIndicator.textContent = `⏱ ${next}`;
+  els.scheduleIndicator.hidden = false;
+}
+
+
 window.addEventListener("beforeunload", () => {
   stopAutoRefresh();
+  stopScheduleChecker();
   window.clearTimeout(state.footerTimer);
 });
