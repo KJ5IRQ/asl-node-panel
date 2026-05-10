@@ -1028,3 +1028,34 @@ code { color: var(--accent); font-family: var(--font-mono); }
   font-size: 1rem;
   line-height: 1;
 }
+
+/* ── Accessibility mode ──────────────────────────────────────────────────────── */
+/* When screen reader mode is on, add visible focus rings and
+   increase contrast on interactive elements */
+
+:root[data-a11y="on"] *:focus {
+  outline: 3px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+:root[data-a11y="on"] button,
+:root[data-a11y="on"] input,
+:root[data-a11y="on"] select {
+  /* Slightly larger touch targets */
+  min-height: 36px;
+}
+
+:root[data-a11y="on"] .summary-card strong {
+  font-size: 1rem;
+}
+
+:root[data-a11y="on"] .section-toggle {
+  min-height: 32px;
+}
+
+/* Default (non-a11y) focus: minimal ring, only keyboard-triggered */
+*:focus:not(:focus-visible) { outline: none; }
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
