@@ -14,10 +14,12 @@ import {
   copIdentify,
   copTime,
   copStatus,
-  copVersion
+  copVersion,
+  createEventStreamFromSettings,
 } from "./services/api.js";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 15000;
+const SLOW_POLL_INTERVAL_MS = 30000; // fallback poll when SSE is live
 const AUDIT_LINES = 50;
 
 const state = {
@@ -34,7 +36,10 @@ const state = {
   dtmfMacros: [],
   schedules: [],
   nodeCountWarning: 0,
-  screenReaderMode: false
+  screenReaderMode: false,
+  // SSE state
+  eventStream: null,
+  sseConnected: false,
 };
 
 const els = {};
@@ -44,7 +49,6 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   await loadAndApplyTheme();
   watchThemeChanges();
-  // Sync toggle icon with current theme after load
   chrome.storage.sync.get({ themeSettings: null }, (r) => updateModeToggleIcon(r.themeSettings));
   bindElements();
   bindEvents();
@@ -56,7 +60,128 @@ async function init() {
   renderScheduleIndicator();
   startScheduleChecker();
   startAutoRefresh();
+  startEventStream();
 }
+
+// ---------------------------------------------------------------------------
+// SSE event stream
+// ---------------------------------------------------------------------------
+
+async function startEventStream() {
+  stopEventStream();
+
+  if (!isReady()) return;
+
+  try {
+    const stream = await createEventStreamFromSettings();
+
+    stream.on("connected", () => {
+      state.sseConnected = true;
+      setConnectionStatus(`Live ● ${state.settings.baseUrl}`);
+      // Switch to slow fallback poll -- SSE handles live state
+      stopAutoRefresh();
+      startSlowPoll();
+    });
+
+    stream.on("error", () => {
+      state.sseConnected = false;
+      setConnectionStatus(`Reconnecting… ${state.settings.baseUrl}`);
+      // Fall back to normal refresh rate while SSE is down
+      stopSlowPoll();
+      startAutoRefresh();
+    });
+
+    stream.on("node.rxkeyed", (data) => {
+      if (!state.variables) state.variables = {};
+      state.variables.rxkeyed = Boolean(data.rxkeyed);
+      renderKeyedIndicators();
+    });
+
+    stream.on("node.txkeyed", (data) => {
+      if (!state.variables) state.variables = {};
+      state.variables.txkeyed = Boolean(data.txkeyed);
+      renderKeyedIndicators();
+    });
+
+    stream.on("node.variables.snapshot", (data) => {
+      if (data.variables) {
+        state.variables = data.variables;
+        renderKeyedIndicators();
+      }
+    });
+
+    stream.on("link.connected", () => {
+      // Refresh node list when a link connects
+      refreshNodesAndStatus({ silent: true });
+    });
+
+    stream.on("link.disconnected", () => {
+      // Refresh node list when a link disconnects
+      refreshNodesAndStatus({ silent: true });
+    });
+
+    state.eventStream = stream;
+    stream.connect();
+  } catch (e) {
+    console.error("Failed to start event stream:", e);
+  }
+}
+
+function stopEventStream() {
+  if (state.eventStream) {
+    state.eventStream.close();
+    state.eventStream = null;
+  }
+  state.sseConnected = false;
+}
+
+// Slow fallback poll -- runs while SSE is live
+// Keeps status/audit fresh without hammering the API
+let slowPollTimer = null;
+
+function startSlowPoll() {
+  stopSlowPoll();
+  slowPollTimer = window.setInterval(() => {
+    refreshAll({ manual: false, silent: true });
+  }, SLOW_POLL_INTERVAL_MS);
+}
+
+function stopSlowPoll() {
+  if (slowPollTimer) {
+    window.clearInterval(slowPollTimer);
+    slowPollTimer = null;
+  }
+}
+
+// Lightweight refresh -- nodes + status only, no full refreshAll
+async function refreshNodesAndStatus({ silent = false } = {}) {
+  if (!isReady()) return;
+  try {
+    const [statusResult, nodesResult] = await Promise.allSettled([
+      getStatus(),
+      getConnectedNodes(),
+    ]);
+
+    if (statusResult.status === "fulfilled") {
+      state.status = normalizeStatus(statusResult.value);
+    }
+    if (nodesResult.status === "fulfilled") {
+      const normalized = normalizeNodesResponse(nodesResult.value);
+      state.connectedNodes = normalized.connectedNodes;
+      state.connectedCount = normalized.count;
+      renderConnectedNodes(state.connectedNodes);
+    }
+    renderStatusHeader();
+    refreshFavoritesStatus();
+    updateControlAvailability();
+  } catch (e) {
+    if (!silent) console.error("refreshNodesAndStatus failed:", e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Element binding
+// ---------------------------------------------------------------------------
 
 function bindElements() {
   els.connectionStatus = requireElement("connectionStatus");
@@ -67,6 +192,7 @@ function bindElements() {
   els.statusKeyups = requireElement("statusKeyups");
   els.statusConnectedCount = requireElement("statusConnectedCount");
   els.statusRxKeyed = requireElement("statusRxKeyed");
+  els.statusTxKeyed = requireElement("statusTxKeyed");
   els.nodeLookupResult = requireElement("nodeLookupResult");
   els.statusUptime = requireElement("statusUptime");
   els.statusTxToday = requireElement("statusTxToday");
@@ -123,7 +249,6 @@ function bindEvents() {
   els.refreshAudit.addEventListener("click", () => refreshAudit({ manual: true }));
 
   els.favoritesList.addEventListener("click", handleFavoritesClick);
-
   els.disconnectAll.addEventListener("click", handleDisconnectAll);
 
   els.dtmfForm.addEventListener("submit", (event) => {
@@ -150,9 +275,7 @@ function bindMessages() {
       if (message?.type === "A11Y_CHANGED") {
         state.screenReaderMode = Boolean(message.screenReaderMode);
         applyAccessibilityMode();
-        if (state.screenReaderMode) {
-          announce("Screen reader mode enabled.", "polite");
-        }
+        if (state.screenReaderMode) announce("Screen reader mode enabled.", "polite");
         return;
       }
       if (message?.type === "THEME_CHANGED") {
@@ -173,21 +296,21 @@ function bindMessages() {
     });
   }
 
-  // Watch storage directly for screenReaderMode changes -- more reliable
-  // than runtime messages which can be missed if panel isn't focused
   if (typeof chrome !== "undefined" && chrome.storage) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "sync") return;
       if (changes.screenReaderMode !== undefined) {
         state.screenReaderMode = Boolean(changes.screenReaderMode.newValue);
         applyAccessibilityMode();
-        if (state.screenReaderMode) {
-          announce("Screen reader mode enabled.", "polite");
-        }
+        if (state.screenReaderMode) announce("Screen reader mode enabled.", "polite");
       }
     });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Initial load
+// ---------------------------------------------------------------------------
 
 async function loadInitialState() {
   try {
@@ -228,6 +351,10 @@ async function loadSettingsIntoState() {
   applyAccessibilityMode();
 }
 
+// ---------------------------------------------------------------------------
+// Refresh logic
+// ---------------------------------------------------------------------------
+
 async function handleRefreshFavorites() {
   try {
     await loadSettingsIntoState();
@@ -240,149 +367,10 @@ async function handleRefreshFavorites() {
   }
 }
 
-function handleOpenSettings() {
-  if (
-    typeof chrome !== "undefined" &&
-    chrome.runtime &&
-    typeof chrome.runtime.openOptionsPage === "function"
-  ) {
-    chrome.runtime.openOptionsPage();
-    return;
-  }
-
-  window.open("options.html", "_blank", "noopener");
-}
-
-function handleConnectFromInput(monitorOnly) {
-  const node = els.connectNodeInput.value.trim();
-
-  runTimedOperation({
-    busyText: monitorOnly
-      ? `Connecting to ${node} in monitor-only mode…`
-      : `Connecting to ${node} in transceive mode…`,
-    action: async () => {
-      await connectNode(node, { monitorOnly });
-      els.connectNodeInput.value = "";
-    },
-    successMessage: monitorOnly
-      ? `Monitor-only connect request sent for node ${node}.`
-      : `Transceive connect request sent for node ${node}.`
-  });
-}
-
-function handleFavoritesClick(event) {
-  const button = event.target.closest("[data-favorite-node][data-favorite-mode]");
-
-  if (!button) {
-    return;
-  }
-
-  const node = button.dataset.favoriteNode;
-  const mode = button.dataset.favoriteMode;
-  const monitorOnly = mode === "monitor";
-
-  runTimedOperation({
-    busyText: monitorOnly
-      ? `Connecting favorite ${node} in monitor-only mode…`
-      : `Connecting favorite ${node} in transceive mode…`,
-    action: () => connectNode(node, { monitorOnly }),
-    successMessage: monitorOnly
-      ? `Monitor-only connect request sent for favorite ${node}.`
-      : `Transceive connect request sent for favorite ${node}.`
-  });
-}
-
-function handleDisconnectAll() {
-  const confirmed = window.confirm(
-    "Disconnect all currently connected nodes?"
-  );
-
-  if (!confirmed) {
-    return;
-  }
-
-  runTimedOperation({
-    busyText: "Disconnecting all nodes…",
-    action: () => disconnectAll(),
-    successMessage: "Disconnect-all request sent.",
-    postDelayMs: 3000
-  });
-}
-
-function handleSendDtmf() {
-  const sequence = els.dtmfInput.value.trim();
-
-  runImmediateOperation({
-    busyText: `Sending DTMF ${sequence}…`,
-    action: async () => {
-      await sendDtmf(sequence, { confirmed: true });
-      els.dtmfInput.value = "";
-    },
-    successMessage: `DTMF sequence ${sequence} sent.`
-  });
-}
-
-async function runTimedOperation({ busyText, action, successMessage, postDelayMs = 0 }) {
-  if (state.busy) {
-    return;
-  }
-
-  if (!isReady()) {
-    setFooter("Configure ASL Agent settings first.", "warning");
-    return;
-  }
-
-  setBusy(true, busyText);
-
-  try {
-    await action();
-    if (postDelayMs > 0) {
-      await sleep(postDelayMs);
-    }
-    await refreshAll({ manual: false, force: true, silent: true });
-    setFooter(successMessage, "success", 3000);
-  } catch (error) {
-    console.error(error);
-    setFooter(error.message, "error");
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function runImmediateOperation({ busyText, action, successMessage }) {
-  if (state.busy) {
-    return;
-  }
-
-  if (!isReady()) {
-    setFooter("Configure ASL Agent settings first.", "warning");
-    return;
-  }
-
-  setBusy(true, busyText);
-
-  try {
-    await action();
-    await refreshAudit({ manual: false, force: true, silent: true });
-    setFooter(successMessage, "success", 3000);
-  } catch (error) {
-    console.error(error);
-    setFooter(error.message, "error");
-  } finally {
-    setBusy(false);
-  }
-}
-
 async function refreshAll(options = {}) {
-  const {
-    manual = false,
-    force = false,
-    silent = false
-  } = options;
+  const { manual = false, force = false, silent = false } = options;
 
-  if (state.busy && !force) {
-    return;
-  }
+  if (state.busy && !force) return;
 
   if (!isReady()) {
     clearStatusHeader();
@@ -393,9 +381,7 @@ async function refreshAll(options = {}) {
     return;
   }
 
-  if (!silent) {
-    setConnectionStatus("Refreshing…");
-  }
+  if (!silent) setConnectionStatus("Refreshing…");
 
   const [statusResult, nodesResult, variablesResult, auditResult] = await Promise.allSettled([
     getStatus(),
@@ -443,51 +429,40 @@ async function refreshAll(options = {}) {
 
   if (hadError) {
     setConnectionStatus("Refresh error");
-    if (!silent) {
-      setFooter("One or more ASL Agent requests failed.", "error");
-    }
+    if (!silent) setFooter("One or more ASL Agent requests failed.", "error");
   } else {
-    setConnectionStatus(`Connected to ${state.settings.baseUrl}`);
-    if (manual && !silent) {
-      setFooter("Status refreshed.", "success", 2000);
+    // Show live indicator if SSE is connected, otherwise just the URL
+    if (state.sseConnected) {
+      setConnectionStatus(`Live ● ${state.settings.baseUrl}`);
+    } else {
+      setConnectionStatus(`Connected to ${state.settings.baseUrl}`);
     }
+    if (manual && !silent) setFooter("Status refreshed.", "success", 2000);
   }
 
   updateControlAvailability();
 }
 
 async function refreshAudit(options = {}) {
-  const {
-    manual = false,
-    force = false,
-    silent = false
-  } = options;
+  const { manual = false, force = false, silent = false } = options;
 
-  if (state.busy && !force) {
-    return;
-  }
-
-  if (!isReady()) {
-    renderEmptyAudit("Configure ASL Agent settings first.");
-    return;
-  }
+  if (state.busy && !force) return;
+  if (!isReady()) { renderEmptyAudit("Configure ASL Agent settings first."); return; }
 
   try {
     const audit = await getAudit(AUDIT_LINES);
     renderAudit(audit);
-
-    if (manual && !silent) {
-      setFooter("Audit log refreshed.", "success", 2000);
-    }
+    if (manual && !silent) setFooter("Audit log refreshed.", "success", 2000);
   } catch (error) {
     console.error(error);
     renderEmptyAudit(`Failed to load audit log: ${error.message}`);
-
-    if (!silent) {
-      setFooter(error.message, "error");
-    }
+    if (!silent) setFooter(error.message, "error");
   }
 }
+
+// ---------------------------------------------------------------------------
+// Render
+// ---------------------------------------------------------------------------
 
 function renderStatusHeader() {
   const status = state.status || {};
@@ -499,7 +474,7 @@ function renderStatusHeader() {
   els.statusUptime.textContent = valueOrDash(status.uptime);
   els.statusTxToday.textContent = valueOrDash(status.tx_time_today);
   els.statusTxTotal.textContent = valueOrDash(status.tx_time_total);
-  renderKeyedIndicator();
+  renderKeyedIndicators();
   renderNodeCountWarning();
 }
 
@@ -508,15 +483,19 @@ function renderNodeCountWarning() {
   const count = state.connectedCount;
   const over = threshold > 0 && count >= threshold;
   els.nodeCountWarningBadge.hidden = !over;
-  if (over) {
-    els.nodeCountWarningBadge.textContent = `⚠ ${count} NODES`;
-  }
+  if (over) els.nodeCountWarningBadge.textContent = `⚠ ${count} NODES`;
 }
 
-function renderKeyedIndicator() {
+function renderKeyedIndicators() {
+  // RX keyed
   const rxKeyed = Boolean(state.variables?.rxkeyed);
-  els.statusRxKeyed.textContent = rxKeyed ? "KEYED" : "";
-  els.statusRxKeyed.className = rxKeyed ? "keyed-badge active" : "keyed-badge";
+  els.statusRxKeyed.textContent = rxKeyed ? "RX" : "";
+  els.statusRxKeyed.className = rxKeyed ? "keyed-badge active rx" : "keyed-badge rx";
+
+  // TX keyed
+  const txKeyed = Boolean(state.variables?.txkeyed);
+  els.statusTxKeyed.textContent = txKeyed ? "TX" : "";
+  els.statusTxKeyed.className = txKeyed ? "keyed-badge active tx" : "keyed-badge tx";
 }
 
 function clearStatusHeader() {
@@ -525,7 +504,9 @@ function clearStatusHeader() {
   els.statusKeyups.textContent = "—";
   els.statusConnectedCount.textContent = "—";
   els.statusRxKeyed.textContent = "";
-  els.statusRxKeyed.className = "keyed-badge";
+  els.statusRxKeyed.className = "keyed-badge rx";
+  els.statusTxKeyed.textContent = "";
+  els.statusTxKeyed.className = "keyed-badge tx";
   els.statusUptime.textContent = "—";
   els.statusTxToday.textContent = "—";
   els.statusTxTotal.textContent = "—";
@@ -536,8 +517,7 @@ function renderFavorites() {
   els.favoritesList.replaceChildren();
 
   if (!state.favorites.length) {
-    const empty = createEmptyState("No favorites configured.");
-    els.favoritesList.appendChild(empty);
+    els.favoritesList.appendChild(createEmptyState("No favorites configured."));
     return;
   }
 
@@ -581,9 +561,7 @@ function renderConnectedNodes(nodes) {
   els.connectedNodesList.replaceChildren();
 
   if (!nodes.length) {
-    els.connectedNodesList.appendChild(
-      createEmptyState("No connected nodes.")
-    );
+    els.connectedNodesList.appendChild(createEmptyState("No connected nodes."));
     return;
   }
 
@@ -602,9 +580,7 @@ function renderConnectedNodes(nodes) {
       const callsign = document.createElement("div");
       callsign.className = "node-callsign";
       callsign.textContent = connectedNode.callsign;
-      if (connectedNode.location) {
-        callsign.title = connectedNode.location;
-      }
+      if (connectedNode.location) callsign.title = connectedNode.location;
       nodeWrap.append(node, callsign);
     } else {
       nodeWrap.appendChild(node);
@@ -642,7 +618,15 @@ function renderAudit(audit) {
   for (const entry of entries) {
     const row = document.createElement("div");
     row.className = "audit-entry";
-    row.textContent = String(entry);
+    // Handle both structured (v1.4+) and raw string (legacy) entries
+    if (entry && typeof entry === "object" && entry.timestamp) {
+      const time = entry.timestamp.replace("T", " ").replace(/\.\d+.*$/, "").replace("+00:00","") + "Z";
+      const cmd  = entry.command || "";
+      const det  = entry.details ? ` — ${entry.details}` : "";
+      row.textContent = `${time}  ${cmd}${det}`;
+    } else {
+      row.textContent = String(entry);
+    }
     els.auditLog.appendChild(row);
   }
 }
@@ -650,6 +634,10 @@ function renderAudit(audit) {
 function renderEmptyAudit(message) {
   els.auditLog.replaceChildren(createEmptyState(message));
 }
+
+// ---------------------------------------------------------------------------
+// Normalizers
+// ---------------------------------------------------------------------------
 
 function normalizeStatus(payload) {
   return {
@@ -663,81 +651,40 @@ function normalizeStatus(payload) {
 }
 
 function normalizeNodesResponse(payload) {
-  const rawNodes = Array.isArray(payload?.connected_nodes)
-    ? payload.connected_nodes
-    : [];
-
-  const connectedNodes = rawNodes
-    .map(normalizeConnectedNode)
-    .filter(Boolean)
-    .sort(compareNodeIdentifiers);
-
+  const rawNodes = Array.isArray(payload?.connected_nodes) ? payload.connected_nodes : [];
+  const connectedNodes = rawNodes.map(normalizeConnectedNode).filter(Boolean).sort(compareNodeIdentifiers);
   const apiCount = Number(payload?.count);
-
   return {
     connectedNodes,
-    count: Number.isInteger(apiCount) && apiCount >= 0
-      ? apiCount
-      : connectedNodes.length
+    count: Number.isInteger(apiCount) && apiCount >= 0 ? apiCount : connectedNodes.length
   };
 }
 
 function normalizeConnectedNode(value) {
-  const node = String(value?.node || "").trim().toUpperCase();
-  const mode = String(value?.mode || "").trim().toUpperCase();
-  const info = String(value?.info || "").trim();
+  const node     = String(value?.node || "").trim().toUpperCase();
+  const mode     = String(value?.mode || "").trim().toUpperCase();
+  const info     = String(value?.info || "").trim();
   const callsign = String(value?.callsign || "").trim();
   const location = String(value?.location || "").trim();
-
-  if (!isValidNodeIdentifier(node)) {
-    return null;
-  }
-
-  return {
-    node,
-    mode: mode === "R" ? "R" : "T",
-    info,
-    callsign,
-    location
-  };
+  if (!isValidNodeIdentifier(node)) return null;
+  return { node, mode: mode === "R" ? "R" : "T", info, callsign, location };
 }
 
 function isValidNodeIdentifier(value) {
   const identifier = String(value || "").trim().toUpperCase();
-
-  if (!identifier) {
-    return false;
-  }
-
+  if (!identifier) return false;
   const isNumericNode = /^\d+$/.test(identifier);
-
-  // Practical amateur radio callsign pattern.
-  // Allows examples like KM5Y, KC8FQV, W1AW, N0CALL, VE3ABC, and G4XYZ.
   const isCallsign = /^[A-Z]{1,3}\d[A-Z0-9]{1,4}$/.test(identifier);
-
   return isNumericNode || isCallsign;
 }
 
 function compareNodeIdentifiers(a, b) {
-  const aNode = a.node;
-  const bNode = b.node;
-
-  const aNumeric = /^\d+$/.test(aNode);
-  const bNumeric = /^\d+$/.test(bNode);
-
-  if (aNumeric && bNumeric) {
-    return Number(aNode) - Number(bNode);
-  }
-
-  if (aNumeric && !bNumeric) {
-    return -1;
-  }
-
-  if (!aNumeric && bNumeric) {
-    return 1;
-  }
-
-  return aNode.localeCompare(bNode);
+  const aNumeric = /^\d+$/.test(a.node);
+  const bNumeric = /^\d+$/.test(b.node);
+  if (aNumeric && bNumeric) return Number(a.node) - Number(b.node);
+  if (aNumeric && !bNumeric) return -1;
+  if (!aNumeric && bNumeric) return 1;
+  return a.node.localeCompare(b.node);
 }
 
 function getModeLabel(mode) {
@@ -751,73 +698,111 @@ function createEmptyState(message) {
   return empty;
 }
 
-function setBusy(isBusyValue, message = "Working…") {
-  state.busy = Boolean(isBusyValue);
+// ---------------------------------------------------------------------------
+// Controls
+// ---------------------------------------------------------------------------
 
-  els.busyMessage.hidden = !state.busy;
-  els.busyText.textContent = message;
-
-  updateControlAvailability();
+function handleOpenSettings() {
+  if (typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.openOptionsPage === "function") {
+    chrome.runtime.openOptionsPage();
+    return;
+  }
+  window.open("options.html", "_blank", "noopener");
 }
 
-function updateControlAvailability() {
-  const configured = isReady();
+function handleConnectFromInput(monitorOnly) {
+  const node = els.connectNodeInput.value.trim();
+  runTimedOperation({
+    busyText: monitorOnly ? `Connecting to ${node} in monitor-only mode…` : `Connecting to ${node} in transceive mode…`,
+    action: async () => { await connectNode(node, { monitorOnly }); els.connectNodeInput.value = ""; },
+    successMessage: monitorOnly ? `Monitor-only connect request sent for node ${node}.` : `Transceive connect request sent for node ${node}.`
+  });
+}
 
-  const controls = document.querySelectorAll("button, input");
+function handleFavoritesClick(event) {
+  const button = event.target.closest("[data-favorite-node][data-favorite-mode]");
+  if (!button) return;
+  const node = button.dataset.favoriteNode;
+  const monitorOnly = button.dataset.favoriteMode === "monitor";
+  runTimedOperation({
+    busyText: monitorOnly ? `Connecting favorite ${node} in monitor-only mode…` : `Connecting favorite ${node} in transceive mode…`,
+    action: () => connectNode(node, { monitorOnly }),
+    successMessage: monitorOnly ? `Monitor-only connect request sent for favorite ${node}.` : `Transceive connect request sent for favorite ${node}.`
+  });
+}
 
-  for (const control of controls) {
-    if (control.id === "openSettings") {
-      control.disabled = false;
-      continue;
-    }
+function handleDisconnectAll() {
+  const confirmed = window.confirm("Disconnect all currently connected nodes?");
+  if (!confirmed) return;
+  runTimedOperation({
+    busyText: "Disconnecting all nodes…",
+    action: () => disconnectAll(),
+    successMessage: "Disconnect-all request sent.",
+    postDelayMs: 3000
+  });
+}
 
-    if (control.id === "refreshFavorites") {
-      control.disabled = state.busy;
-      continue;
-    }
+function handleSendDtmf() {
+  const sequence = els.dtmfInput.value.trim();
+  runImmediateOperation({
+    busyText: `Sending DTMF ${sequence}…`,
+    action: async () => { await sendDtmf(sequence, { confirmed: true }); els.dtmfInput.value = ""; },
+    successMessage: `DTMF sequence ${sequence} sent.`
+  });
+}
 
-    control.disabled = state.busy || !configured;
+async function runTimedOperation({ busyText, action, successMessage, postDelayMs = 0 }) {
+  if (state.busy) return;
+  if (!isReady()) { setFooter("Configure ASL Agent settings first.", "warning"); return; }
+  setBusy(true, busyText);
+  try {
+    await action();
+    if (postDelayMs > 0) await sleep(postDelayMs);
+    await refreshAll({ manual: false, force: true, silent: true });
+    setFooter(successMessage, "success", 3000);
+  } catch (error) {
+    console.error(error);
+    setFooter(error.message, "error");
+  } finally {
+    setBusy(false);
   }
 }
 
-function setConnectionStatus(message) {
-  const prev = els.connectionStatus.textContent;
-  els.connectionStatus.textContent = message;
-  if (state.screenReaderMode && message && message !== prev) {
-    announce(message, "polite");
+async function runImmediateOperation({ busyText, action, successMessage }) {
+  if (state.busy) return;
+  if (!isReady()) { setFooter("Configure ASL Agent settings first.", "warning"); return; }
+  setBusy(true, busyText);
+  try {
+    await action();
+    await refreshAudit({ manual: false, force: true, silent: true });
+    setFooter(successMessage, "success", 3000);
+  } catch (error) {
+    console.error(error);
+    setFooter(error.message, "error");
+  } finally {
+    setBusy(false);
   }
 }
 
-function setFooter(message, type = "", timeoutMs = 0) {
-  window.clearTimeout(state.footerTimer);
-
-  els.footerMessage.textContent = message;
-  els.footerMessage.className = type;
-
-  // Screen reader announcement
-  if (state.screenReaderMode && message) {
-    const isError = type === "error";
-    announce(message, isError ? "assertive" : "polite");
-  }
-
-  if (timeoutMs > 0) {
-    state.footerTimer = window.setTimeout(() => {
-      els.footerMessage.textContent = "";
-      els.footerMessage.className = "";
-    }, timeoutMs);
-  }
+async function handleCop(command) {
+  const actions = { identify: copIdentify, time: copTime, status: copStatus, version: copVersion };
+  const labels  = { identify: "Identify", time: "Time", status: "Status", version: "Version" };
+  runImmediateOperation({
+    busyText: `Sending COP ${labels[command]}…`,
+    action: () => actions[command](),
+    successMessage: `COP ${labels[command]} sent.`
+  });
 }
+
+// ---------------------------------------------------------------------------
+// Timers / auto-refresh
+// ---------------------------------------------------------------------------
 
 function startAutoRefresh() {
   stopAutoRefresh();
-
   const intervalMs = (state.settings?.refreshInterval || 15) * 1000;
-
   state.refreshTimer = window.setInterval(() => {
-    refreshAll({
-      manual: false,
-      silent: true
-    });
+    refreshAll({ manual: false, silent: true });
   }, intervalMs);
 }
 
@@ -828,56 +813,70 @@ function stopAutoRefresh() {
   }
 }
 
-function isReady() {
-  return isConfigured(state.settings);
+// ---------------------------------------------------------------------------
+// Utility
+// ---------------------------------------------------------------------------
+
+function setBusy(isBusyValue, message = "Working…") {
+  state.busy = Boolean(isBusyValue);
+  els.busyMessage.hidden = !state.busy;
+  els.busyText.textContent = message;
+  updateControlAvailability();
 }
 
-function valueOrDash(value) {
-  const normalized = String(value || "").trim();
-  return normalized || "—";
+function updateControlAvailability() {
+  const configured = isReady();
+  const controls = document.querySelectorAll("button, input");
+  for (const control of controls) {
+    if (control.id === "openSettings") { control.disabled = false; continue; }
+    if (control.id === "refreshFavorites") { control.disabled = state.busy; continue; }
+    control.disabled = state.busy || !configured;
+  }
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
+function setConnectionStatus(message) {
+  const prev = els.connectionStatus.textContent;
+  els.connectionStatus.textContent = message;
+  if (state.screenReaderMode && message && message !== prev) announce(message, "polite");
 }
+
+function setFooter(message, type = "", timeoutMs = 0) {
+  window.clearTimeout(state.footerTimer);
+  els.footerMessage.textContent = message;
+  els.footerMessage.className = type;
+  if (state.screenReaderMode && message) {
+    announce(message, type === "error" ? "assertive" : "polite");
+  }
+  if (timeoutMs > 0) {
+    state.footerTimer = window.setTimeout(() => {
+      els.footerMessage.textContent = "";
+      els.footerMessage.className = "";
+    }, timeoutMs);
+  }
+}
+
+function isReady() { return isConfigured(state.settings); }
+function valueOrDash(value) { return String(value || "").trim() || "—"; }
+function sleep(ms) { return new Promise((resolve) => window.setTimeout(resolve, ms)); }
 
 function requireElement(id) {
   const element = document.getElementById(id);
-
-  if (!element) {
-    throw new Error(`Missing required element: #${id}`);
-  }
-
+  if (!element) throw new Error(`Missing required element: #${id}`);
   return element;
 }
 
-
-async function handleCop(command) {
-  const actions = { identify: copIdentify, time: copTime, status: copStatus, version: copVersion };
-  const labels = { identify: "Identify", time: "Time", status: "Status", version: "Version" };
-
-  runImmediateOperation({
-    busyText: `Sending COP ${labels[command]}…`,
-    action: () => actions[command](),
-    successMessage: `COP ${labels[command]} sent.`
-  });
-}
+// ---------------------------------------------------------------------------
+// Node lookup
+// ---------------------------------------------------------------------------
 
 let nodeLookupTimer = null;
 
 function handleNodeLookupInput() {
   const value = els.connectNodeInput.value.trim();
-
   window.clearTimeout(nodeLookupTimer);
   els.nodeLookupResult.hidden = true;
   els.nodeLookupResult.textContent = "";
-
-  if (!/^\d{4,7}$/.test(value)) {
-    return;
-  }
-
+  if (!/^\d{4,7}$/.test(value)) return;
   nodeLookupTimer = window.setTimeout(async () => {
     try {
       const result = await lookupNode(value);
@@ -887,43 +886,32 @@ function handleNodeLookupInput() {
         els.nodeLookupResult.textContent = parts.join(" — ");
         els.nodeLookupResult.hidden = false;
       }
-    } catch {
-      // Lookup failure is silent -- node may just not be in the DB
-    }
+    } catch { /* silent */ }
   }, 400);
 }
+
+// ---------------------------------------------------------------------------
+// Section collapse
+// ---------------------------------------------------------------------------
 
 async function handleSectionToggle(event) {
   const btn = event.currentTarget;
   const bodyId = btn.getAttribute("aria-controls");
   const body = document.getElementById(bodyId);
   const sectionKey = btn.id.replace("toggle-", "");
-
   if (!body) return;
-
-  const isExpanded = btn.getAttribute("aria-expanded") === "true";
-  const nowExpanded = !isExpanded;
-
+  const nowExpanded = btn.getAttribute("aria-expanded") !== "true";
   btn.setAttribute("aria-expanded", String(nowExpanded));
   body.hidden = !nowExpanded;
   btn.querySelector(".toggle-icon").textContent = nowExpanded ? "▾" : "▸";
-
-  if (nowExpanded) {
-    state.collapsedSections.delete(sectionKey);
-  } else {
-    state.collapsedSections.add(sectionKey);
-  }
-
-  try {
-    await storageSet({ collapsedSections: [...state.collapsedSections] });
-  } catch {
-    // Non-critical -- collapse state just won't persist
-  }
+  if (nowExpanded) { state.collapsedSections.delete(sectionKey); }
+  else { state.collapsedSections.add(sectionKey); }
+  try { await storageSet({ collapsedSections: [...state.collapsedSections] }); } catch { /* non-critical */ }
 }
 
 function applyCollapsedSections() {
   for (const sectionKey of state.collapsedSections) {
-    const btn = document.getElementById(`toggle-${sectionKey}`);
+    const btn  = document.getElementById(`toggle-${sectionKey}`);
     const body = document.getElementById(`${sectionKey}-body`);
     if (btn && body) {
       btn.setAttribute("aria-expanded", "false");
@@ -934,18 +922,14 @@ function applyCollapsedSections() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// DTMF macros
+// ---------------------------------------------------------------------------
 
-// ── Feature 3: DTMF Macro quick-buttons ─────────────────────────────────────
 function renderDtmfMacros() {
   els.dtmfMacrosGrid.replaceChildren();
-
-  if (!state.dtmfMacros.length) {
-    els.dtmfMacrosGrid.hidden = true;
-    return;
-  }
-
+  if (!state.dtmfMacros.length) { els.dtmfMacrosGrid.hidden = true; return; }
   els.dtmfMacrosGrid.hidden = false;
-
   for (const macro of state.dtmfMacros) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -953,44 +937,35 @@ function renderDtmfMacros() {
     btn.textContent = macro.label;
     btn.title = macro.sequence;
     btn.dataset.macroSequence = macro.sequence;
-    btn.addEventListener("click", () => {
-      els.dtmfInput.value = macro.sequence;
-      handleSendDtmf();
-    });
+    btn.addEventListener("click", () => { els.dtmfInput.value = macro.sequence; handleSendDtmf(); });
     els.dtmfMacrosGrid.appendChild(btn);
   }
 }
 
-// ── Feature 2: Favorites live status scanning ────────────────────────────────
+// ---------------------------------------------------------------------------
+// Favorites live status
+// ---------------------------------------------------------------------------
+
 const ASL_STATS_BASE = "https://stats.allstarlink.org/api";
 let favoritesStatusCache = {};
 
 async function fetchFavoriteStats(nodeNumber) {
   try {
-    const resp = await fetch(`${ASL_STATS_BASE}/stats/${nodeNumber}`, {
-      signal: AbortSignal.timeout(5000)
-    });
+    const resp = await fetch(`${ASL_STATS_BASE}/stats/${nodeNumber}`, { signal: AbortSignal.timeout(5000) });
     if (!resp.ok) return null;
     return await resp.json();
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function refreshFavoritesStatus() {
   if (!state.favorites.length) return;
-
-  const results = await Promise.allSettled(
-    state.favorites.map((f) => fetchFavoriteStats(f.node))
-  );
-
+  const results = await Promise.allSettled(state.favorites.map((f) => fetchFavoriteStats(f.node)));
   results.forEach((result, i) => {
     const node = state.favorites[i]?.node;
     if (node && result.status === "fulfilled" && result.value) {
       favoritesStatusCache[node] = result.value;
     }
   });
-
   renderFavoritesStatus();
 }
 
@@ -1001,11 +976,7 @@ function renderFavoritesStatus() {
     if (!node) return;
     const stats = favoritesStatusCache[node];
     let badge = item.querySelector(".favorite-status");
-    if (!badge) {
-      badge = document.createElement("div");
-      badge.className = "favorite-status";
-      item.appendChild(badge);
-    }
+    if (!badge) { badge = document.createElement("div"); badge.className = "favorite-status"; item.appendChild(badge); }
     if (stats) {
       const count = stats.linked_count ?? stats.connectedNodes ?? stats.connections ?? "?";
       const keyed = stats.keyed ?? stats.rxkeyed ?? false;
@@ -1018,7 +989,10 @@ function renderFavoritesStatus() {
   });
 }
 
-// ── Feature 1: Schedule checker ──────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Schedule checker
+// ---------------------------------------------------------------------------
+
 let scheduleCheckerTimer = null;
 
 function startScheduleChecker() {
@@ -1028,31 +1002,24 @@ function startScheduleChecker() {
 }
 
 function stopScheduleChecker() {
-  if (scheduleCheckerTimer) {
-    window.clearInterval(scheduleCheckerTimer);
-    scheduleCheckerTimer = null;
-  }
+  if (scheduleCheckerTimer) { window.clearInterval(scheduleCheckerTimer); scheduleCheckerTimer = null; }
 }
 
 function checkSchedules() {
   if (!state.schedules.length) return;
-
   const now = new Date();
   const utcDay = now.getUTCDay();
   const utcHour = now.getUTCHours();
   const utcMinute = now.getUTCMinutes();
-
   for (const schedule of state.schedules) {
     if (!schedule.enabled) continue;
     if (!schedule.days.includes(utcDay)) continue;
     if (schedule.hour !== utcHour) continue;
     if (Math.abs(schedule.minute - utcMinute) > 1) continue;
-
     const key = `sched_last_${schedule.id}`;
     const lastFired = Number(sessionStorage.getItem(key) || 0);
     const nowMs = Date.now();
-    if (nowMs - lastFired < 90000) continue; // debounce 90s
-
+    if (nowMs - lastFired < 90000) continue;
     sessionStorage.setItem(key, String(nowMs));
     executeSchedule(schedule);
   }
@@ -1060,14 +1027,10 @@ function checkSchedules() {
 
 async function executeSchedule(schedule) {
   if (!isReady()) return;
-
   try {
-    if (schedule.action === "disconnect-all") {
+    if (schedule.action === "disconnect-all" || schedule.action === "disconnect") {
       await disconnectAll();
       setFooter(`Schedule: Disconnect All fired.`, "success", 4000);
-    } else if (schedule.action === "disconnect") {
-      await disconnectAll();
-      setFooter(`Schedule: Disconnect fired.`, "success", 4000);
     } else {
       const monitorOnly = schedule.mode === "monitor";
       await connectNode(schedule.node, { monitorOnly });
@@ -1082,51 +1045,34 @@ async function executeSchedule(schedule) {
 }
 
 function renderScheduleIndicator() {
-  if (!state.schedules.length) {
-    els.scheduleIndicator.hidden = true;
-    return;
-  }
-
+  if (!state.schedules.length) { els.scheduleIndicator.hidden = true; return; }
   const enabled = state.schedules.filter((s) => s.enabled);
-  if (!enabled.length) {
-    els.scheduleIndicator.hidden = true;
-    return;
-  }
-
+  if (!enabled.length) { els.scheduleIndicator.hidden = true; return; }
   const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const next = enabled
-    .map((s) => {
-      const day = DAY_NAMES[s.days[0]] || "?";
-      const time = `${String(s.hour).padStart(2,"0")}:${String(s.minute).padStart(2,"0")}`;
-      return `${s.action === "disconnect-all" ? "Disc All" : `${s.action} ${s.node}`} @ ${day} ${time}`;
-    })
-    .slice(0, 2)
-    .join(" | ");
-
+  const next = enabled.map((s) => {
+    const day = DAY_NAMES[s.days[0]] || "?";
+    const time = `${String(s.hour).padStart(2,"0")}:${String(s.minute).padStart(2,"0")}`;
+    return `${s.action === "disconnect-all" ? "Disc All" : `${s.action} ${s.node}`} @ ${day} ${time}`;
+  }).slice(0, 2).join(" | ");
   els.scheduleIndicator.textContent = `⏱ ${next}`;
   els.scheduleIndicator.hidden = false;
 }
 
+// ---------------------------------------------------------------------------
+// Theme toggle
+// ---------------------------------------------------------------------------
 
 async function handleToggleMode() {
   try {
-    const result = await new Promise((resolve) => {
-      chrome.storage.sync.get({ themeSettings: null }, resolve);
-    });
-
+    const result = await new Promise((resolve) => chrome.storage.sync.get({ themeSettings: null }, resolve));
     const current = result.themeSettings || { preset: "system", mode: "dark", customColors: {} };
-
-    // If system default, switch to slate dark/light based on OS current mode
-    // so the toggle makes visible sense
     let newSettings;
     if (current.preset === "system") {
       const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      // Toggling from system: lock to the opposite of current OS mode
       newSettings = { ...current, preset: "slate", mode: systemDark ? "light" : "dark" };
     } else {
       newSettings = { ...current, mode: current.mode === "dark" ? "light" : "dark" };
     }
-
     await new Promise((resolve) => chrome.storage.sync.set({ themeSettings: newSettings }, resolve));
     applyTheme(newSettings);
     updateModeToggleIcon(newSettings);
@@ -1139,33 +1085,26 @@ async function handleToggleMode() {
 function updateModeToggleIcon(themeSettings) {
   if (!els.toggleMode) return;
   const ts = themeSettings || {};
-
   let isDark;
   if (ts.preset === "system" || !ts.preset) {
     isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
   } else {
     isDark = ts.mode !== "light";
   }
-
   els.toggleMode.textContent = isDark ? "☀" : "☾";
   els.toggleMode.title = isDark ? "Switch to light mode" : "Switch to dark mode";
   els.toggleMode.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
 }
 
-
-// ── Accessibility engine ──────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Accessibility
+// ---------------------------------------------------------------------------
 
 function applyAccessibilityMode() {
   const enabled = state.screenReaderMode;
   document.documentElement.setAttribute("data-a11y", enabled ? "on" : "off");
-
-  // Ensure live regions have correct role
-  if (els.srAnnouncer) {
-    els.srAnnouncer.setAttribute("aria-live", "polite");
-  }
-  if (els.srAnnouncerAssertive) {
-    els.srAnnouncerAssertive.setAttribute("aria-live", "assertive");
-  }
+  if (els.srAnnouncer) els.srAnnouncer.setAttribute("aria-live", "polite");
+  if (els.srAnnouncerAssertive) els.srAnnouncerAssertive.setAttribute("aria-live", "assertive");
 }
 
 let announceTimer = null;
@@ -1173,17 +1112,19 @@ function announce(message, priority = "polite") {
   if (!state.screenReaderMode) return;
   const el = priority === "assertive" ? els.srAnnouncerAssertive : els.srAnnouncer;
   if (!el) return;
-  // Clear then set -- forces re-announcement of same message
   el.textContent = "";
   window.clearTimeout(announceTimer);
-  announceTimer = window.setTimeout(() => {
-    el.textContent = message;
-  }, 50);
+  announceTimer = window.setTimeout(() => { el.textContent = message; }, 50);
 }
 
+// ---------------------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------------------
 
 window.addEventListener("beforeunload", () => {
   stopAutoRefresh();
+  stopSlowPoll();
+  stopEventStream();
   stopScheduleChecker();
   window.clearTimeout(state.footerTimer);
 });
