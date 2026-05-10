@@ -487,15 +487,15 @@ function renderNodeCountWarning() {
 }
 
 function renderKeyedIndicators() {
-  // RX keyed
+  // RX -- signal present on node input (someone is transmitting TO the node)
   const rxKeyed = Boolean(state.variables?.rxkeyed);
-  els.statusRxKeyed.textContent = rxKeyed ? "RX" : "";
-  els.statusRxKeyed.className = rxKeyed ? "keyed-badge active rx" : "keyed-badge rx";
+  els.statusRxKeyed.textContent = "RX";
+  els.statusRxKeyed.className = rxKeyed ? "keyed-badge rx active" : "keyed-badge rx";
 
-  // TX keyed
+  // TX -- node transmitter is active (node is transmitting OUT)
   const txKeyed = Boolean(state.variables?.txkeyed);
-  els.statusTxKeyed.textContent = txKeyed ? "TX" : "";
-  els.statusTxKeyed.className = txKeyed ? "keyed-badge active tx" : "keyed-badge tx";
+  els.statusTxKeyed.textContent = "TX";
+  els.statusTxKeyed.className = txKeyed ? "keyed-badge tx active" : "keyed-badge tx";
 }
 
 function clearStatusHeader() {
@@ -503,9 +503,9 @@ function clearStatusHeader() {
   els.statusCallsign.textContent = "—";
   els.statusKeyups.textContent = "—";
   els.statusConnectedCount.textContent = "—";
-  els.statusRxKeyed.textContent = "";
+  els.statusRxKeyed.textContent = "RX";
   els.statusRxKeyed.className = "keyed-badge rx";
-  els.statusTxKeyed.textContent = "";
+  els.statusTxKeyed.textContent = "TX";
   els.statusTxKeyed.className = "keyed-badge tx";
   els.statusUptime.textContent = "—";
   els.statusTxToday.textContent = "—";
