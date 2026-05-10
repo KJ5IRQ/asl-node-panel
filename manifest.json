@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ASL Node Panel",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Monitor and control your AllStar Link node via ASL3-API.",
   "minimum_chrome_version": "116",
   "permissions": [
