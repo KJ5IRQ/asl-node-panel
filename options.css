@@ -1,8 +1,84 @@
 /* ASL Node Panel - Options page styles */
-/* Theme section */
+/* Uses the same CSS variable system as sidepanel.css */
+
+body {
+  font-family: 'Share Tech Mono', 'Courier New', monospace;
+  background: var(--bg);
+  color: var(--text);
+  transition: background 0.2s, color 0.2s;
+}
+
+.settings-page {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+.settings-page h1 {
+  font-family: 'Oswald', Impact, sans-serif;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-bright);
+  margin: 0 0 4px;
+}
+
+.settings-page .subtitle {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-bottom: 24px;
+}
+
+section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+section h2 {
+  font-family: 'Oswald', Impact, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+.field-group {
+  margin-bottom: 12px;
+}
+
+.field-group label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+
+.hint {
+  color: var(--faint);
+  font-size: 0.70rem;
+  margin-top: 5px;
+  line-height: 1.4;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* ── Theme section ──────────────────────────────────────────────────────────── */
 .mode-toggle {
   display: flex;
   gap: 16px;
+  margin-top: 6px;
 }
 
 .mode-option {
@@ -10,18 +86,13 @@
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
+  color: var(--text);
 }
 
-.custom-colors {
-  margin-top: 10px;
-}
+.custom-colors { margin-top: 10px; }
 
-.color-picker-grid {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 10px;
-}
+.color-picker-grid { display: grid; gap: 7px; margin-bottom: 10px; }
 
 .color-picker-row {
   display: flex;
@@ -31,50 +102,48 @@
 
 .color-picker-row label {
   flex: 1;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
+  color: var(--muted);
   min-width: 120px;
 }
 
 .color-picker-row input[type="color"] {
-  width: 44px;
-  height: 30px;
+  width: 40px;
+  height: 28px;
   padding: 2px;
-  border-radius: 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--input);
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .color-hex-value {
   font-family: monospace;
-  font-size: 0.78rem;
-  color: var(--muted, #666);
-  min-width: 60px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  min-width: 58px;
 }
 
 .theme-preview {
   margin-top: 12px;
-  border-radius: 6px;
+  border-radius: 5px;
   overflow: hidden;
-  border: 1px solid var(--border, #ccc);
+  border: 1px solid var(--border);
 }
 
-.preview-bar {
-  height: 4px;
-  width: 100%;
-}
+.preview-bar { height: 3px; width: 100%; }
 
-.preview-panel {
-  padding: 10px 14px;
-}
+.preview-panel { padding: 10px 14px; }
 
 .preview-text {
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   font-weight: 600;
   margin-bottom: 3px;
 }
 
 .preview-muted {
-  font-size: 0.72rem;
+  font-size: 0.70rem;
   margin-bottom: 6px;
 }
 
@@ -82,26 +151,122 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.72rem;
+  font-size: 0.70rem;
 }
 
 .preview-badge {
-  padding: 2px 7px;
-  border-radius: 3px;
+  padding: 2px 6px;
+  border-radius: 2px;
   font-weight: 700;
+  font-size: 0.65rem;
+}
+
+.preview-badge.success { background: #22c55e; color: #000; }
+.preview-badge.warning { background: #f59e0b; color: #000; }
+.preview-accent { font-weight: 600; }
+
+/* ── Item lists (macros, schedules, favorites) ───────────────────────────────── */
+.item-list { display: grid; gap: 5px; margin-top: 8px; }
+
+.item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--panel-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: 3px;
+  flex-wrap: wrap;
+}
+
+.item-row.disabled { opacity: 0.45; }
+
+.item-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-value {
+  color: var(--amber);
+  font-family: monospace;
+  font-size: 0.73rem;
+  white-space: nowrap;
+}
+
+.empty-state {
+  padding: 8px 10px;
+  color: var(--faint);
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  text-align: center;
+  font-size: 0.70rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* ── Field row (inline inputs + button) ─────────────────────────────────────── */
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.field-row input,
+.field-row select { flex: 1; min-width: 80px; }
+
+.field-row button { flex-shrink: 0; }
+
+.field-sep { color: var(--muted); font-size: 1rem; }
+
+.field-hint-inline {
+  color: var(--faint);
   font-size: 0.68rem;
+  white-space: nowrap;
 }
 
-.preview-badge.success {
-  background: #22c55e;
-  color: #000;
+/* ── Schedule form ───────────────────────────────────────────────────────────── */
+.schedule-form { display: grid; gap: 8px; }
+
+.day-picker { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+
+.day-picker label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
 }
 
-.preview-badge.warning {
-  background: #f59e0b;
-  color: #000;
+/* ── Status message ──────────────────────────────────────────────────────────── */
+.status {
+  font-size: 0.78rem;
+  min-height: 1.4em;
+  color: var(--muted);
 }
 
-.preview-accent {
-  font-weight: 600;
+.status.success { color: var(--success); }
+.status.error   { color: var(--danger-text); }
+.status.warning { color: var(--warning); }
+
+/* ── Favorite items ──────────────────────────────────────────────────────────── */
+.favorite-item {
+  display: grid;
+  grid-template-columns: minmax(60px, auto) 1fr auto;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--panel-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: 3px;
 }
+
+.favorite-node { font-weight: 700; font-size: 0.86rem; color: var(--text-bright); }
+.favorite-label { color: var(--muted); font-size: 0.78rem; }
