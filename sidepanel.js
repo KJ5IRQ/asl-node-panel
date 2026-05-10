@@ -33,7 +33,8 @@ const state = {
   collapsedSections: new Set(),
   dtmfMacros: [],
   schedules: [],
-  nodeCountWarning: 0
+  nodeCountWarning: 0,
+  screenReaderMode: false
 };
 
 const els = {};
@@ -73,6 +74,8 @@ function bindElements() {
   els.nodeCountWarningBadge = requireElement("nodeCountWarningBadge");
   els.dtmfMacrosGrid = requireElement("dtmfMacrosGrid");
   els.scheduleIndicator = requireElement("scheduleIndicator");
+  els.srAnnouncer = requireElement("srAnnouncer");
+  els.srAnnouncerAssertive = requireElement("srAnnouncerAssertive");
   els.toggleMode = requireElement("toggleMode");
   els.copIdentify = requireElement("copIdentify");
   els.copTime = requireElement("copTime");
@@ -156,6 +159,7 @@ function bindMessages() {
         loadSettingsIntoState().then(() => {
           renderDtmfMacros();
           renderScheduleIndicator();
+          applyAccessibilityMode();
         }).catch(console.error);
       }
     });
@@ -197,6 +201,8 @@ async function loadSettingsIntoState() {
   state.dtmfMacros = Array.isArray(settings.dtmfMacros) ? settings.dtmfMacros : [];
   state.schedules = normalizeSchedules(Array.isArray(settings.schedules) ? settings.schedules : []);
   state.nodeCountWarning = Number(settings.nodeCountWarning) || 0;
+  state.screenReaderMode = Boolean(settings.screenReaderMode);
+  applyAccessibilityMode();
 }
 
 async function handleRefreshFavorites() {
@@ -752,7 +758,11 @@ function updateControlAvailability() {
 }
 
 function setConnectionStatus(message) {
+  const prev = els.connectionStatus.textContent;
   els.connectionStatus.textContent = message;
+  if (state.screenReaderMode && message && message !== prev) {
+    announce(message, "polite");
+  }
 }
 
 function setFooter(message, type = "", timeoutMs = 0) {
@@ -760,6 +770,12 @@ function setFooter(message, type = "", timeoutMs = 0) {
 
   els.footerMessage.textContent = message;
   els.footerMessage.className = type;
+
+  // Screen reader announcement
+  if (state.screenReaderMode && message) {
+    const isError = type === "error";
+    announce(message, isError ? "assertive" : "polite");
+  }
 
   if (timeoutMs > 0) {
     state.footerTimer = window.setTimeout(() => {
@@ -1111,6 +1127,35 @@ function updateModeToggleIcon(themeSettings) {
   els.toggleMode.textContent = isDark ? "☀" : "☾";
   els.toggleMode.title = isDark ? "Switch to light mode" : "Switch to dark mode";
   els.toggleMode.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
+}
+
+
+// ── Accessibility engine ──────────────────────────────────────────────────────
+
+function applyAccessibilityMode() {
+  const enabled = state.screenReaderMode;
+  document.documentElement.setAttribute("data-a11y", enabled ? "on" : "off");
+
+  // Ensure live regions have correct role
+  if (els.srAnnouncer) {
+    els.srAnnouncer.setAttribute("aria-live", "polite");
+  }
+  if (els.srAnnouncerAssertive) {
+    els.srAnnouncerAssertive.setAttribute("aria-live", "assertive");
+  }
+}
+
+let announceTimer = null;
+function announce(message, priority = "polite") {
+  if (!state.screenReaderMode) return;
+  const el = priority === "assertive" ? els.srAnnouncerAssertive : els.srAnnouncer;
+  if (!el) return;
+  // Clear then set -- forces re-announcement of same message
+  el.textContent = "";
+  window.clearTimeout(announceTimer);
+  announceTimer = window.setTimeout(() => {
+    el.textContent = message;
+  }, 50);
 }
 
 
