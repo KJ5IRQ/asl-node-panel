@@ -1,18 +1,23 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEYS = ["baseUrl", "apiKey", "favorites", "refreshInterval", "collapsedSections"];
+  const STORAGE_KEYS = ["baseUrl", "apiKey", "favorites", "refreshInterval", "collapsedSections", "dtmfMacros", "schedules", "nodeCountWarning"];
 
   const DEFAULT_SETTINGS = {
     baseUrl: "",
     apiKey: "",
     favorites: [],
     refreshInterval: 15,
-    collapsedSections: []
+    collapsedSections: [],
+    dtmfMacros: [],
+    schedules: [],
+    nodeCountWarning: 0
   };
 
   const state = {
     favorites: [],
+    dtmfMacros: [],
+    schedules: [],
     statusTimer: null
   };
 
@@ -37,6 +42,19 @@
     els.favoritesList = document.getElementById("favoritesList");
 
     els.refreshInterval = document.getElementById("refreshInterval");
+    els.nodeCountWarning = document.getElementById("nodeCountWarning");
+    els.macroLabel = document.getElementById("macroLabel");
+    els.macroSequence = document.getElementById("macroSequence");
+    els.addMacro = document.getElementById("addMacro");
+    els.macrosList = document.getElementById("macrosList");
+    els.scheduleNode = document.getElementById("scheduleNode");
+    els.scheduleAction = document.getElementById("scheduleAction");
+    els.scheduleMode = document.getElementById("scheduleMode");
+    els.scheduleHour = document.getElementById("scheduleHour");
+    els.scheduleMinute = document.getElementById("scheduleMinute");
+    els.dayPicker = document.getElementById("dayPicker");
+    els.addSchedule = document.getElementById("addSchedule");
+    els.schedulesList = document.getElementById("schedulesList");
     els.saveSettings = document.getElementById("saveSettings");
     els.resetSettings = document.getElementById("resetSettings");
     els.statusMessage = document.getElementById("statusMessage");
@@ -48,6 +66,11 @@
     els.saveSettings.addEventListener("click", handleSaveSettings);
     els.resetSettings.addEventListener("click", handleResetSettings);
     els.favoritesList.addEventListener("click", handleFavoritesListClick);
+    els.addMacro.addEventListener("click", handleAddMacro);
+    els.macrosList.addEventListener("click", handleMacrosListClick);
+    els.addSchedule.addEventListener("click", handleAddSchedule);
+    els.schedulesList.addEventListener("click", handleSchedulesListClick);
+    populateTimeSelects();
 
     els.favoriteNode.addEventListener("keydown", handleFavoriteEnterKey);
     els.favoriteLabel.addEventListener("keydown", handleFavoriteEnterKey);
@@ -62,6 +85,13 @@
       if (els.refreshInterval) {
         els.refreshInterval.value = String(settings.refreshInterval || 15);
       }
+      if (els.nodeCountWarning) {
+        els.nodeCountWarning.value = String(settings.nodeCountWarning || 0);
+      }
+      state.dtmfMacros = Array.isArray(settings.dtmfMacros) ? settings.dtmfMacros : [];
+      state.schedules = Array.isArray(settings.schedules) ? settings.schedules : [];
+      renderMacros();
+      renderSchedules();
       state.favorites = sanitizeFavorites(settings.favorites);
 
       renderFavorites();
@@ -90,7 +120,10 @@
         baseUrl: validated.baseUrl,
         apiKey: validated.apiKey,
         favorites: validated.favorites,
-        refreshInterval: validated.refreshInterval
+        refreshInterval: validated.refreshInterval,
+        dtmfMacros: validated.dtmfMacros,
+        schedules: validated.schedules,
+        nodeCountWarning: validated.nodeCountWarning
       });
 
       setStatus("Settings saved.", "success", 2000);
@@ -232,7 +265,10 @@
       baseUrl,
       apiKey,
       favorites,
-      refreshInterval: [5, 15, 30, 60].includes(refreshInterval) ? refreshInterval : 15
+      refreshInterval: [5, 15, 30, 60].includes(refreshInterval) ? refreshInterval : 15,
+      dtmfMacros: state.dtmfMacros,
+      schedules: state.schedules,
+      nodeCountWarning: Math.max(0, Number(els.nodeCountWarning?.value) || 0)
     };
   }
 
@@ -480,6 +516,175 @@
         // Panel may not be open -- ignore.
       });
     }
+  }
+
+
+  function populateTimeSelects() {
+    if (!els.scheduleHour || !els.scheduleMinute) return;
+    for (let h = 0; h < 24; h++) {
+      const o = document.createElement("option");
+      o.value = String(h);
+      o.textContent = String(h).padStart(2, "0");
+      els.scheduleHour.appendChild(o);
+    }
+    for (let m = 0; m < 60; m += 5) {
+      const o = document.createElement("option");
+      o.value = String(m);
+      o.textContent = String(m).padStart(2, "0");
+      els.scheduleMinute.appendChild(o);
+    }
+  }
+
+  async function handleAddMacro() {
+    const label = els.macroLabel.value.trim();
+    const sequence = els.macroSequence.value.trim();
+    if (!label || !sequence) {
+      setStatus("Label and sequence are required.", "error");
+      return;
+    }
+    if (state.dtmfMacros.length >= 6) {
+      setStatus("Maximum 6 macros.", "error");
+      return;
+    }
+    state.dtmfMacros.push({ label, sequence });
+    els.macroLabel.value = "";
+    els.macroSequence.value = "";
+    renderMacros();
+    await storageSet({ dtmfMacros: state.dtmfMacros });
+    notifyPanelFavoritesChanged();
+    setStatus("Macro saved.", "success", 2000);
+  }
+
+  async function handleMacrosListClick(event) {
+    const btn = event.target.closest("[data-remove-macro]");
+    if (!btn) return;
+    const idx = Number(btn.dataset.removeMacro);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= state.dtmfMacros.length) return;
+    state.dtmfMacros.splice(idx, 1);
+    renderMacros();
+    await storageSet({ dtmfMacros: state.dtmfMacros });
+    notifyPanelFavoritesChanged();
+    setStatus("Macro removed.", "success", 2000);
+  }
+
+  function renderMacros() {
+    if (!els.macrosList) return;
+    els.macrosList.replaceChildren();
+    if (!state.dtmfMacros.length) {
+      const e = document.createElement("div");
+      e.className = "empty-state";
+      e.textContent = "No macros saved yet.";
+      els.macrosList.appendChild(e);
+      return;
+    }
+    state.dtmfMacros.forEach((m, i) => {
+      const item = document.createElement("div");
+      item.className = "item-row";
+      const label = document.createElement("span");
+      label.className = "item-label";
+      label.textContent = m.label;
+      const seq = document.createElement("span");
+      seq.className = "item-value";
+      seq.textContent = m.sequence;
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "danger";
+      rm.textContent = "Remove";
+      rm.dataset.removeMacro = String(i);
+      item.append(label, seq, rm);
+      els.macrosList.appendChild(item);
+    });
+  }
+
+  async function handleAddSchedule() {
+    const node = els.scheduleNode.value.trim();
+    const action = els.scheduleAction.value;
+    if (action !== "disconnect-all" && !node) {
+      setStatus("Node number required.", "error");
+      return;
+    }
+    const days = Array.from(
+      els.dayPicker.querySelectorAll("input[type=checkbox]:checked")
+    ).map((cb) => Number(cb.value));
+    if (!days.length) {
+      setStatus("Select at least one day.", "error");
+      return;
+    }
+    const schedule = {
+      id: Math.random().toString(36).slice(2),
+      node,
+      action,
+      mode: els.scheduleMode.value,
+      days,
+      hour: Number(els.scheduleHour.value),
+      minute: Number(els.scheduleMinute.value),
+      enabled: true
+    };
+    state.schedules.push(schedule);
+    renderSchedules();
+    await storageSet({ schedules: state.schedules });
+    notifyPanelFavoritesChanged();
+    setStatus("Schedule saved.", "success", 2000);
+  }
+
+  async function handleSchedulesListClick(event) {
+    const rm = event.target.closest("[data-remove-schedule]");
+    if (rm) {
+      const id = rm.dataset.removeSchedule;
+      state.schedules = state.schedules.filter((s) => s.id !== id);
+      renderSchedules();
+      await storageSet({ schedules: state.schedules });
+      notifyPanelFavoritesChanged();
+      setStatus("Schedule removed.", "success", 2000);
+      return;
+    }
+    const toggle = event.target.closest("[data-toggle-schedule]");
+    if (toggle) {
+      const id = toggle.dataset.toggleSchedule;
+      const s = state.schedules.find((s) => s.id === id);
+      if (s) {
+        s.enabled = !s.enabled;
+        renderSchedules();
+        await storageSet({ schedules: state.schedules });
+        notifyPanelFavoritesChanged();
+      }
+    }
+  }
+
+  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  function renderSchedules() {
+    if (!els.schedulesList) return;
+    els.schedulesList.replaceChildren();
+    if (!state.schedules.length) {
+      const e = document.createElement("div");
+      e.className = "empty-state";
+      e.textContent = "No schedules saved yet.";
+      els.schedulesList.appendChild(e);
+      return;
+    }
+    state.schedules.forEach((s) => {
+      const item = document.createElement("div");
+      item.className = `item-row${s.enabled ? "" : " disabled"}`;
+      const info = document.createElement("span");
+      info.className = "item-label";
+      const dayStr = s.days.map((d) => DAY_NAMES[d]).join(", ");
+      const timeStr = `${String(s.hour).padStart(2,"0")}:${String(s.minute).padStart(2,"0")} UTC`;
+      const actionStr = s.action === "disconnect-all" ? "Disconnect All" : `${s.action} ${s.node}`;
+      info.textContent = `${actionStr} — ${dayStr} @ ${timeStr}`;
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "secondary";
+      toggle.textContent = s.enabled ? "ON" : "OFF";
+      toggle.dataset.toggleSchedule = s.id;
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "danger";
+      rm.textContent = "Remove";
+      rm.dataset.removeSchedule = s.id;
+      item.append(info, toggle, rm);
+      els.schedulesList.appendChild(item);
+    });
   }
 
 })();
