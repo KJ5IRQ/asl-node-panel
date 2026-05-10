@@ -43,6 +43,8 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   await loadAndApplyTheme();
   watchThemeChanges();
+  // Sync toggle icon with current theme after load
+  chrome.storage.sync.get({ themeSettings: null }, (r) => updateModeToggleIcon(r.themeSettings));
   bindElements();
   bindEvents();
   bindMessages();
@@ -71,6 +73,7 @@ function bindElements() {
   els.nodeCountWarningBadge = requireElement("nodeCountWarningBadge");
   els.dtmfMacrosGrid = requireElement("dtmfMacrosGrid");
   els.scheduleIndicator = requireElement("scheduleIndicator");
+  els.toggleMode = requireElement("toggleMode");
   els.copIdentify = requireElement("copIdentify");
   els.copTime = requireElement("copTime");
   els.copStatus = requireElement("copStatus");
@@ -131,6 +134,7 @@ function bindEvents() {
   els.copVersion.addEventListener("click", () => handleCop("version"));
 
   els.connectNodeInput.addEventListener("input", handleNodeLookupInput);
+  els.toggleMode.addEventListener("click", handleToggleMode);
 
   document.querySelectorAll(".section-toggle").forEach((btn) => {
     btn.addEventListener("click", handleSectionToggle);
@@ -143,6 +147,7 @@ function bindMessages() {
       if (message?.type === "THEME_CHANGED") {
         chrome.storage.sync.get({ themeSettings: null }, (result) => {
           applyTheme(result.themeSettings);
+          updateModeToggleIcon(result.themeSettings);
         });
         return;
       }
@@ -1061,6 +1066,51 @@ function renderScheduleIndicator() {
 
   els.scheduleIndicator.textContent = `⏱ ${next}`;
   els.scheduleIndicator.hidden = false;
+}
+
+
+async function handleToggleMode() {
+  try {
+    const result = await new Promise((resolve) => {
+      chrome.storage.sync.get({ themeSettings: null }, resolve);
+    });
+
+    const current = result.themeSettings || { preset: "system", mode: "dark", customColors: {} };
+
+    // If system default, switch to slate dark/light based on OS current mode
+    // so the toggle makes visible sense
+    let newSettings;
+    if (current.preset === "system") {
+      const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      // Toggling from system: lock to the opposite of current OS mode
+      newSettings = { ...current, preset: "slate", mode: systemDark ? "light" : "dark" };
+    } else {
+      newSettings = { ...current, mode: current.mode === "dark" ? "light" : "dark" };
+    }
+
+    await new Promise((resolve) => chrome.storage.sync.set({ themeSettings: newSettings }, resolve));
+    applyTheme(newSettings);
+    updateModeToggleIcon(newSettings);
+    chrome.runtime.sendMessage({ type: "THEME_CHANGED" }).catch(() => {});
+  } catch (error) {
+    console.error("Toggle mode failed:", error);
+  }
+}
+
+function updateModeToggleIcon(themeSettings) {
+  if (!els.toggleMode) return;
+  const ts = themeSettings || {};
+
+  let isDark;
+  if (ts.preset === "system" || !ts.preset) {
+    isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  } else {
+    isDark = ts.mode !== "light";
+  }
+
+  els.toggleMode.textContent = isDark ? "☀" : "☾";
+  els.toggleMode.title = isDark ? "Switch to light mode" : "Switch to dark mode";
+  els.toggleMode.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
 }
 
 
