@@ -5,7 +5,10 @@ export const STORAGE_KEYS = Object.freeze({
   API_KEY: "apiKey",
   FAVORITES: "favorites",
   REFRESH_INTERVAL: "refreshInterval",
-  COLLAPSED_SECTIONS: "collapsedSections"
+  COLLAPSED_SECTIONS: "collapsedSections",
+  DTMF_MACROS: "dtmfMacros",
+  SCHEDULES: "schedules",
+  NODE_COUNT_WARNING: "nodeCountWarning"
 });
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -13,7 +16,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   [STORAGE_KEYS.API_KEY]: "",
   [STORAGE_KEYS.FAVORITES]: [],
   [STORAGE_KEYS.REFRESH_INTERVAL]: 15,
-  [STORAGE_KEYS.COLLAPSED_SECTIONS]: []
+  [STORAGE_KEYS.COLLAPSED_SECTIONS]: [],
+  [STORAGE_KEYS.DTMF_MACROS]: [],
+  [STORAGE_KEYS.SCHEDULES]: [],
+  [STORAGE_KEYS.NODE_COUNT_WARNING]: 0
 });
 
 export async function getSettings() {
@@ -24,7 +30,10 @@ export async function getSettings() {
     apiKey: normalizeStoredApiKey(settings.apiKey),
     favorites: sanitizeFavorites(settings.favorites),
     refreshInterval: normalizeRefreshInterval(settings.refreshInterval),
-    collapsedSections: normalizeCollapsedSections(settings.collapsedSections)
+    collapsedSections: normalizeCollapsedSections(settings.collapsedSections),
+    dtmfMacros: normalizeDtmfMacros(settings.dtmfMacros),
+    schedules: normalizeSchedules(settings.schedules),
+    nodeCountWarning: normalizeNodeCountWarning(settings.nodeCountWarning)
   };
 }
 
@@ -126,7 +135,10 @@ export function normalizeSettings(settings = {}) {
     apiKey: normalizeApiKey(settings.apiKey),
     favorites: sanitizeFavorites(settings.favorites),
     refreshInterval: normalizeRefreshInterval(settings.refreshInterval),
-    collapsedSections: normalizeCollapsedSections(settings.collapsedSections)
+    collapsedSections: normalizeCollapsedSections(settings.collapsedSections),
+    dtmfMacros: normalizeDtmfMacros(settings.dtmfMacros),
+    schedules: normalizeSchedules(settings.schedules),
+    nodeCountWarning: normalizeNodeCountWarning(settings.nodeCountWarning)
   };
 }
 
@@ -329,4 +341,33 @@ export function normalizeCollapsedSections(value) {
     return [];
   }
   return value.filter((s) => typeof s === "string");
+}
+
+export function normalizeDtmfMacros(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((m) => m && typeof m.label === "string" && typeof m.sequence === "string")
+    .map((m) => ({ label: String(m.label).trim().slice(0, 20), sequence: String(m.sequence).trim().slice(0, 30) }))
+    .slice(0, 6);
+}
+
+export function normalizeSchedules(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((s) => s && typeof s.node === "string" && typeof s.action === "string")
+    .map((s) => ({
+      id: String(s.id || Math.random().toString(36).slice(2)),
+      node: String(s.node).trim(),
+      action: ["connect", "disconnect", "disconnect-all"].includes(s.action) ? s.action : "connect",
+      mode: s.mode === "monitor" ? "monitor" : "transceive",
+      days: Array.isArray(s.days) ? s.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [],
+      hour: Math.min(23, Math.max(0, Number(s.hour) || 0)),
+      minute: Math.min(59, Math.max(0, Number(s.minute) || 0)),
+      enabled: Boolean(s.enabled !== false)
+    }));
+}
+
+export function normalizeNodeCountWarning(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 ? n : 0;
 }
