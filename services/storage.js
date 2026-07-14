@@ -94,7 +94,7 @@ export function normalizeApiKey(value) {
 
 export function normalizeNodeNumber(value) {
   const node = String(value || "").trim();
-  if (!node) throw new Error("Node number is required.");
+  if (!/^\d{1,7}$/.test(node)) throw new Error("Node number must be 1-7 digits.");
   return node;
 }
 

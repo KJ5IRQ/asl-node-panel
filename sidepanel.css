@@ -637,9 +637,10 @@ p { margin: 0; }
   animation: pulse-key 1s ease-in-out infinite;
 }
 
-/* ── Keyed badge ─────────────────────────────────────────────────────────────── */
+/* ── Keyed badge -- always visible, dim when inactive, lit when active ───────── */
 .keyed-card {
   display: flex;
+  gap: 6px;
   justify-content: center;
   align-items: center;
   padding: 3px 4px;
@@ -651,19 +652,26 @@ p { margin: 0; }
   font-size: 0.55rem;
   font-weight: 700;
   letter-spacing: 0.08em;
-  padding: 2px 4px;
+  padding: 2px 6px;
   border-radius: 2px;
   text-transform: uppercase;
-  color: transparent;
-  background: transparent;
-  border: 1px solid transparent;
-  transition: color 0.15s, background 0.15s;
+  background: var(--panel-strong);
+  color: var(--muted);
+  opacity: 0.45;
+  transition: color 0.15s, background 0.15s, opacity 0.15s;
 }
 
-.keyed-badge.active {
+.keyed-badge.rx.active {
+  background: var(--success);
   color: var(--bg);
+  opacity: 1;
+  animation: pulse-key 1.2s ease-in-out infinite;
+}
+
+.keyed-badge.tx.active {
   background: var(--amber);
-  border-color: var(--amber-dim);
+  color: var(--bg);
+  opacity: 1;
   animation: pulse-key 1.2s ease-in-out infinite;
 }
 
@@ -1058,47 +1066,6 @@ code { color: var(--accent); font-family: var(--font-mono); }
 *:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-}
-
-/* ── SSE Live indicator ──────────────────────────────────── */
-#connectionStatus.live::before {
-  content: "\25CF  ";
-  color: var(--color-success, #4caf50);
-}
-
-/* ── RX / TX keyed badges -- always visible, lit when active ── */
-.keyed-badge.rx,
-.keyed-badge.tx {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  transition: background 0.15s, color 0.15s, opacity 0.15s;
-  opacity: 0.25;
-  background: #444;
-  color: #888;
-}
-
-/* RX active -- green (receiving signal) */
-.keyed-badge.rx.active {
-  background: #22c55e;
-  color: #000;
-  opacity: 1;
-}
-
-/* TX active -- amber (transmitting) */
-.keyed-badge.tx.active {
-  background: #f59e0b;
-  color: #000;
-  opacity: 1;
-}
-
-.keyed-card {
-  display: flex;
-  gap: 6px;
-  align-items: center;
 }
 
 /* ── Connected To bar ────────────────────────────────────────────────── */

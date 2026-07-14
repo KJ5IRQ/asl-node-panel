@@ -22,7 +22,8 @@
     schedules: [],
     themeSettings: { preset: "system", mode: "dark", customColors: {} },
     screenReaderMode: false,
-    statusTimer: null
+    statusTimer: null,
+    customColorSaveTimer: null
   };
 
   const els = {};
@@ -173,16 +174,13 @@
     try {
       await storageRemove(STORAGE_KEYS);
 
-      els.baseUrl.value = "";
-      els.apiKey.value = "";
       els.apiKey.type = "password";
       els.toggleApiKey.textContent = "Show API Key";
-
       els.favoriteNode.value = "";
       els.favoriteLabel.value = "";
-      state.favorites = [];
 
-      renderFavorites();
+      await loadSettings();
+      notifyPanelFavoritesChanged();
       setStatus("Settings reset.", "success", 2000);
     } catch (error) {
       console.error(error);
@@ -822,10 +820,15 @@
       ...state.themeSettings,
       customColors: { ...(state.themeSettings.customColors || {}), [key]: val }
     };
+    // Live preview is instant; persisting to sync storage is debounced so
+    // dragging the color picker doesn't blow through the ~120 writes/min quota.
     document.documentElement.style.setProperty(key, val);
     applyPreviewTheme();
-    storageSet({ themeSettings: state.themeSettings }).catch(console.error);
-    chrome.runtime.sendMessage({ type: "THEME_CHANGED" }).catch(() => {});
+    window.clearTimeout(state.customColorSaveTimer);
+    state.customColorSaveTimer = window.setTimeout(() => {
+      storageSet({ themeSettings: state.themeSettings }).catch(console.error);
+      chrome.runtime.sendMessage({ type: "THEME_CHANGED" }).catch(() => {});
+    }, 400);
   }
 
   async function handleResetCustomColors() {

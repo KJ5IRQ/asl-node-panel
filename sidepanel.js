@@ -7,6 +7,7 @@ import {
   getConnectedNodes,
   getVariables,
   connectNode,
+  disconnectNode,
   disconnectAll,
   sendDtmf,
   getAudit,
@@ -670,7 +671,10 @@ function renderAudit(audit) {
     row.className = "audit-entry";
     // Handle both structured (v1.4+) and raw string (legacy) entries
     if (entry && typeof entry === "object" && entry.timestamp) {
-      const time = entry.timestamp.replace("T", " ").replace(/\.\d+.*$/, "").replace("+00:00","") + "Z";
+      const d = new Date(entry.timestamp);
+      const time = Number.isNaN(d.getTime())
+        ? entry.timestamp
+        : d.toISOString().slice(0, 19).replace("T", " ") + " Z";
       const cmd  = entry.command || "";
       const det  = entry.details ? ` — ${entry.details}` : "";
       row.textContent = `${time}  ${cmd}${det}`;
@@ -1030,8 +1034,15 @@ let favoritesStatsLastRun = 0;
 async function fetchFavoriteStats(nodeNumber) {
   try {
     const resp = await fetch(`${ASL_STATS_BASE}/stats/${nodeNumber}`, { signal: AbortSignal.timeout(5000) });
+    if (resp.status === 429) return "ratelimited";
     if (!resp.ok) return null;
-    return await resp.json();
+    const payload = await resp.json();
+    const data = payload?.stats?.data;
+    if (!data) return null;
+    return {
+      linkedCount: Array.isArray(data.links) ? data.links.length : 0,
+      keyed: Boolean(data.keyed)
+    };
   } catch { return null; }
 }
 
@@ -1043,7 +1054,11 @@ async function refreshFavoritesStatus() {
   // Fetch sequentially with a small gap to avoid burst rate limiting
   for (const f of state.favorites) {
     const result = await fetchFavoriteStats(f.node);
-    if (result) favoritesStatusCache[f.node] = result;
+    if (result === "ratelimited") {
+      // Rate limited -- keep whatever is already cached rather than clobbering it.
+    } else if (result) {
+      favoritesStatusCache[f.node] = result;
+    }
     await new Promise((r) => setTimeout(r, 500));
   }
   renderFavoritesStatus();
@@ -1058,13 +1073,11 @@ function renderFavoritesStatus() {
     let badge = item.querySelector(".favorite-status");
     if (!badge) { badge = document.createElement("div"); badge.className = "favorite-status"; item.appendChild(badge); }
     if (stats) {
-      const count = stats.linked_count ?? stats.connectedNodes ?? stats.connections ?? "?";
-      const keyed = stats.keyed ?? stats.rxkeyed ?? false;
-      badge.textContent = `${count} linked${keyed ? " · KEYED" : ""}`;
-      badge.className = `favorite-status${keyed ? " keyed" : ""}`;
+      badge.textContent = `${stats.linkedCount} linked${stats.keyed ? " · KEYED" : ""}`;
+      badge.className = `favorite-status${stats.keyed ? " keyed" : ""}`;
     } else {
-      badge.textContent = "offline";
-      badge.className = "favorite-status offline";
+      badge.textContent = "--";
+      badge.className = "favorite-status";
     }
   });
 }
@@ -1108,9 +1121,16 @@ function checkSchedules() {
 async function executeSchedule(schedule) {
   if (!isReady()) return;
   try {
-    if (schedule.action === "disconnect-all" || schedule.action === "disconnect") {
+    if (schedule.action === "disconnect-all") {
       await disconnectAll();
       setFooter(`Schedule: Disconnect All fired.`, "success", 4000);
+    } else if (schedule.action === "disconnect") {
+      if (!schedule.node) {
+        setFooter("Schedule failed: disconnect schedule has no node.", "error");
+        return;
+      }
+      await disconnectNode(schedule.node);
+      setFooter(`Schedule: Disconnected ${schedule.node}.`, "success", 4000);
     } else {
       const monitorOnly = schedule.mode === "monitor";
       await connectNode(schedule.node, { monitorOnly });
@@ -1201,10 +1221,16 @@ function announce(message, priority = "polite") {
 // Cleanup
 // ---------------------------------------------------------------------------
 
-window.addEventListener("beforeunload", () => {
+let cleanedUp = false;
+function cleanup() {
+  if (cleanedUp) return;
+  cleanedUp = true;
   stopAutoRefresh();
   stopSlowPoll();
   stopEventStream();
   stopScheduleChecker();
   window.clearTimeout(state.footerTimer);
-});
+}
+
+window.addEventListener("beforeunload", cleanup);
+window.addEventListener("pagehide", cleanup);

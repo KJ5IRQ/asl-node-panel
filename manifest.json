@@ -3,7 +3,7 @@
   "name": "ASL Node Panel",
   "version": "0.6.2",
   "description": "Monitor and control your AllStar Link node via ASL3-API.",
-  "minimum_chrome_version": "116",
+  "minimum_chrome_version": "123",
   "permissions": [
     "storage",
     "sidePanel",
