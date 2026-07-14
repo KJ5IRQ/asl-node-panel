@@ -1,8 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Oswald:wght@400;600;700&display=swap');
-
 /* ═══════════════════════════════════════════════════════════════════════════════
    BASE STYLES
-   Palettes and [data-a11y] rules live in themes.css (loaded first).
+   Palettes, [data-a11y] rules, and @font-face declarations live in
+   themes.css (loaded first).
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 * { box-sizing: border-box; }
@@ -410,7 +409,7 @@ p { margin: 0; }
 }
 
 .favorite-item { grid-template-columns: minmax(60px, auto) 1fr; }
-.connected-node-item { grid-template-columns: minmax(60px, auto) auto 1fr; }
+.connected-node-item { grid-template-columns: minmax(60px, auto) auto 1fr auto; }
 
 .favorite-actions {
   grid-column: 1 / -1;
@@ -616,12 +615,19 @@ p { margin: 0; }
   font-size: 0.70rem;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+  pointer-events: auto;
 }
 
 .footer-status span:empty { display: none; }
 .footer-status .success { color: var(--success); border-left-color: var(--success); }
 .footer-status .warning { color: var(--warning); border-left-color: var(--warning); }
 .footer-status .error   { color: var(--danger-text); border-left-color: var(--danger-text); }
+
+.footer-status .footer-settings-link {
+  display: inline-block;
+  margin-left: 8px;
+  vertical-align: middle;
+}
 
 /* ── Misc ────────────────────────────────────────────────────────────────────── */
 .hint {
@@ -657,7 +663,7 @@ code { color: var(--accent); font-family: var(--font-mono); }
   .app-shell { padding: 7px; }
   .status-header { margin: -7px -7px 7px; padding: 7px; }
   .node-summary { grid-template-columns: 1fr 1fr; }
-  .connected-node-item { grid-template-columns: 1fr auto; }
+  .connected-node-item { grid-template-columns: 1fr auto auto; }
   .connected-node-item .node-info { grid-column: 1 / -1; }
 }
 

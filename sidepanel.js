@@ -18,11 +18,13 @@ import {
   copVersion,
   createEventStreamFromSettings,
   parseActiveLinks,
+  getCapabilities,
 } from "./services/api.js";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 15000;
 const SLOW_POLL_INTERVAL_MS = 30000; // fallback poll when SSE is live
 const AUDIT_LINES = 50;
+const MAX_SSE_ERRORS = 5; // consecutive errors before giving up on SSE for this session
 
 const state = {
   settings: null,
@@ -78,12 +80,25 @@ async function startEventStream() {
 
   if (!isReady()) return;
 
+  // Probe capabilities first -- a wrong API key or a pre-v1.4 backend must
+  // not send us into a silent, infinite SSE reconnect loop. If this fails,
+  // stay on normal polling and never open the EventSource at all.
+  try {
+    await getCapabilities();
+  } catch (error) {
+    setConnectionStatus("Polling (live events need backend v1.4+)");
+    if (isAuthError(error)) setFooter(error.message, "error", 0, { settingsLink: true });
+    return;
+  }
+
   try {
     const stream = await createEventStreamFromSettings();
+    let sseErrorCount = 0;
 
     stream.on("connected", () => {
+      sseErrorCount = 0;
       state.sseConnected = true;
-      setConnectionStatus(`Live ● ${state.settings.baseUrl}`);
+      setConnectionStatus(`Live ● ${hostOnly(state.settings.baseUrl)}`);
       // Switch to slow fallback poll -- SSE handles live state
       stopAutoRefresh();
       startSlowPoll();
@@ -91,7 +106,16 @@ async function startEventStream() {
 
     stream.on("error", () => {
       state.sseConnected = false;
-      setConnectionStatus(`Reconnecting… ${state.settings.baseUrl}`);
+      sseErrorCount += 1;
+      if (sseErrorCount >= MAX_SSE_ERRORS) {
+        // Give up on SSE for this session rather than reconnect forever.
+        stopEventStream();
+        setConnectionStatus("Live events unavailable, polling");
+        stopSlowPoll();
+        startAutoRefresh();
+        return;
+      }
+      setConnectionStatus(`Reconnecting… ${hostOnly(state.settings.baseUrl)}`);
       // Fall back to normal refresh rate while SSE is down
       stopSlowPoll();
       startAutoRefresh();
@@ -262,6 +286,7 @@ function bindEvents() {
 
   els.favoritesList.addEventListener("click", handleFavoritesClick);
   els.disconnectAll.addEventListener("click", handleDisconnectAll);
+  els.connectedNodesList.addEventListener("click", handleConnectedNodesClick);
 
   els.dtmfForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -297,7 +322,7 @@ function bindMessages() {
         });
         return;
       }
-      if (message?.type === "FAVORITES_CHANGED") {
+      if (message?.type === "SETTINGS_CHANGED") {
         handleRefreshFavorites();
         loadSettingsIntoState().then(() => {
           renderDtmfMacros();
@@ -341,7 +366,7 @@ async function loadInitialState() {
       renderEmptyConnectedNodes("Configure ASL Agent settings first.");
       renderEmptyAudit("Configure ASL Agent settings first.");
       setConnectionStatus("Not configured");
-      setFooter("Open settings to add your ASL Agent base URL and API key.", "warning");
+      setFooter("Open settings to add your ASL Agent base URL and API key.", "warning", 0, { settingsLink: true });
       return;
     }
 
@@ -349,7 +374,7 @@ async function loadInitialState() {
   } catch (error) {
     console.error(error);
     setConnectionStatus("Error");
-    setFooter(error.message, "error");
+    setFooter(error.message, "error", 0, { settingsLink: isAuthError(error) });
     updateControlAvailability();
   }
 }
@@ -401,6 +426,13 @@ async function refreshAll(options = {}) {
 
   if (!silent) setConnectionStatus("Refreshing…");
 
+  // A manual refresh is also the user's cue to retry live events if SSE
+  // isn't currently connected (e.g. it gave up earlier, or the backend was
+  // down and is back now). Fire-and-forget -- it manages its own status text.
+  if (manual && !state.sseConnected) {
+    startEventStream();
+  }
+
   const [statusResult, nodesResult, variablesResult, auditResult] = await Promise.allSettled([
     getStatus(),
     getConnectedNodes(),
@@ -409,11 +441,13 @@ async function refreshAll(options = {}) {
   ]);
 
   let hadError = false;
+  let authError = false;
 
   if (statusResult.status === "fulfilled") {
     state.status = normalizeStatus(statusResult.value);
   } else {
     hadError = true;
+    if (isAuthError(statusResult.reason)) authError = true;
     console.error(statusResult.reason);
   }
 
@@ -433,6 +467,7 @@ async function refreshAll(options = {}) {
     renderConnectedNodes(state.connectedNodes);
   } else {
     hadError = true;
+    if (isAuthError(nodesResult.reason)) authError = true;
     console.error(nodesResult.reason);
     renderEmptyConnectedNodes(`Failed to load connected nodes: ${nodesResult.reason.message}`);
   }
@@ -441,6 +476,7 @@ async function refreshAll(options = {}) {
     state.variables = variablesResult.value;
     state.activeLinks = parseActiveLinks(state.variables?.active_links);
   } else {
+    if (isAuthError(variablesResult.reason)) authError = true;
     console.error(variablesResult.reason);
   }
 
@@ -448,6 +484,7 @@ async function refreshAll(options = {}) {
     renderAudit(auditResult.value);
   } else {
     hadError = true;
+    if (isAuthError(auditResult.reason)) authError = true;
     console.error(auditResult.reason);
     renderEmptyAudit(`Failed to load audit log: ${auditResult.reason.message}`);
   }
@@ -457,13 +494,13 @@ async function refreshAll(options = {}) {
 
   if (hadError) {
     setConnectionStatus("Refresh error");
-    if (!silent) setFooter("One or more ASL Agent requests failed.", "error");
+    if (!silent) setFooter("One or more ASL Agent requests failed.", "error", 0, { settingsLink: authError });
   } else {
-    // Show live indicator if SSE is connected, otherwise just the URL
+    // Show live indicator if SSE is connected, otherwise just the host
     if (state.sseConnected) {
-      setConnectionStatus(`Live ● ${state.settings.baseUrl}`);
+      setConnectionStatus(`Live ● ${hostOnly(state.settings.baseUrl)}`);
     } else {
-      setConnectionStatus(`Connected to ${state.settings.baseUrl}`);
+      setConnectionStatus(`Connected to ${hostOnly(state.settings.baseUrl)}`);
     }
     if (manual && !silent) setFooter("Status refreshed.", "success", 2000);
   }
@@ -484,7 +521,7 @@ async function refreshAudit(options = {}) {
   } catch (error) {
     console.error(error);
     renderEmptyAudit(`Failed to load audit log: ${error.message}`);
-    if (!silent) setFooter(error.message, "error");
+    if (!silent) setFooter(error.message, "error", 0, { settingsLink: isAuthError(error) });
   }
 }
 
@@ -640,20 +677,42 @@ function renderConnectedNodes(nodes) {
     mode.textContent = connectedNode.mode;
     mode.title = getModeLabel(connectedNode.mode);
 
+    // When the backend sends no info string, leave this column empty -- the
+    // mode badge (plus its title/aria-label) already carries the T/R mode,
+    // so falling back to getModeLabel() here just restated the badge.
     const info = document.createElement("div");
     info.className = "node-info";
-    info.textContent = connectedNode.info || getModeLabel(connectedNode.mode);
-    info.title = connectedNode.info || getModeLabel(connectedNode.mode);
+    info.textContent = connectedNode.info || "";
+    info.title = connectedNode.info || "";
 
     if (state.activeLinks.has(connectedNode.node)) {
       item.classList.add("transmitting");
     }
 
-    item.append(nodeWrap, mode, info);
+    const discBtn = document.createElement("button");
+    discBtn.type = "button";
+    discBtn.className = "small danger";
+    discBtn.textContent = "Disc";
+    discBtn.title = `Disconnect node ${connectedNode.node}`;
+    discBtn.setAttribute("aria-label", `Disconnect node ${connectedNode.node}`);
+    discBtn.dataset.disconnectNode = connectedNode.node;
+
+    item.append(nodeWrap, mode, info, discBtn);
     els.connectedNodesList.appendChild(item);
   }
 
   renderActiveNode();
+}
+
+function handleConnectedNodesClick(event) {
+  const button = event.target.closest("[data-disconnect-node]");
+  if (!button) return;
+  const node = button.dataset.disconnectNode;
+  runTimedOperation({
+    busyText: `Disconnecting ${node}…`,
+    action: async () => { await disconnectNode(node); },
+    successMessage: `Disconnect request sent for node ${node}.`
+  });
 }
 
 function renderEmptyConnectedNodes(message) {
@@ -836,7 +895,7 @@ function handleSendDtmf() {
 
 async function runTimedOperation({ busyText, action, successMessage, postDelayMs = 0 }) {
   if (state.busy) return;
-  if (!isReady()) { setFooter("Configure ASL Agent settings first.", "warning"); return; }
+  if (!isReady()) { setFooter("Configure ASL Agent settings first.", "warning", 0, { settingsLink: true }); return; }
   setBusy(true, busyText);
   try {
     await action();
@@ -845,7 +904,7 @@ async function runTimedOperation({ busyText, action, successMessage, postDelayMs
     setFooter(successMessage, "success", 3000);
   } catch (error) {
     console.error(error);
-    setFooter(error.message, "error");
+    setFooter(error.message, "error", 0, { settingsLink: isAuthError(error) });
   } finally {
     setBusy(false);
   }
@@ -853,7 +912,7 @@ async function runTimedOperation({ busyText, action, successMessage, postDelayMs
 
 async function runImmediateOperation({ busyText, action, successMessage }) {
   if (state.busy) return;
-  if (!isReady()) { setFooter("Configure ASL Agent settings first.", "warning"); return; }
+  if (!isReady()) { setFooter("Configure ASL Agent settings first.", "warning", 0, { settingsLink: true }); return; }
   setBusy(true, busyText);
   try {
     await action();
@@ -861,7 +920,7 @@ async function runImmediateOperation({ busyText, action, successMessage }) {
     setFooter(successMessage, "success", 3000);
   } catch (error) {
     console.error(error);
-    setFooter(error.message, "error");
+    setFooter(error.message, "error", 0, { settingsLink: isAuthError(error) });
   } finally {
     setBusy(false);
   }
@@ -927,22 +986,47 @@ function updateControlAvailability() {
 function setConnectionStatus(message) {
   const prev = els.connectionStatus.textContent;
   els.connectionStatus.textContent = message;
+  // The status line shows host:port only (see hostOnly()) to avoid wrapping
+  // in a 400px panel; the full base URL is still available on hover/focus.
+  if (state.settings?.baseUrl) {
+    els.connectionStatus.title = state.settings.baseUrl;
+  } else {
+    els.connectionStatus.removeAttribute("title");
+  }
   if (state.screenReaderMode && message && message !== prev) announce(message, "polite");
 }
 
-function setFooter(message, type = "", timeoutMs = 0) {
+function hostOnly(baseUrl) {
+  try { return new URL(baseUrl).host; } catch { return baseUrl; }
+}
+
+function setFooter(message, type = "", timeoutMs = 0, { settingsLink = false } = {}) {
   window.clearTimeout(state.footerTimer);
-  els.footerMessage.textContent = message;
+  els.footerMessage.replaceChildren(document.createTextNode(message));
   els.footerMessage.className = type;
+  if (settingsLink) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "small secondary footer-settings-link";
+    btn.textContent = "Open Settings";
+    btn.addEventListener("click", handleOpenSettings);
+    els.footerMessage.appendChild(btn);
+  }
   if (state.screenReaderMode && message) {
     announce(message, type === "error" ? "assertive" : "polite");
   }
   if (timeoutMs > 0) {
     state.footerTimer = window.setTimeout(() => {
-      els.footerMessage.textContent = "";
+      els.footerMessage.replaceChildren();
       els.footerMessage.className = "";
     }, timeoutMs);
   }
+}
+
+// AslAgentApiError.status is 0 for network/timeout failures, so 401/403 here
+// specifically means "the backend rejected our credentials."
+function isAuthError(error) {
+  return error?.status === 401 || error?.status === 403;
 }
 
 function isReady() { return isConfigured(state.settings); }

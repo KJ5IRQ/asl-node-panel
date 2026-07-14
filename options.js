@@ -8,7 +8,7 @@ import {
   getOriginPattern,
   isValidNodeNumber,
 } from "./services/storage.js";
-import { normalizeDtmfSequence } from "./services/api.js";
+import { normalizeDtmfSequence, AslAgentClient } from "./services/api.js";
 import { applyTheme } from "./services/theme.js";
 
 const STORAGE_KEYS = ["baseUrl", "apiKey", "favorites", "refreshInterval", "collapsedSections", "dtmfMacros", "schedules", "nodeCountWarning", "themeSettings", "screenReaderMode"];
@@ -50,6 +50,7 @@ function bindElements() {
   els.baseUrl = document.getElementById("baseUrl");
   els.apiKey = document.getElementById("apiKey");
   els.toggleApiKey = document.getElementById("toggleApiKey");
+  els.testConnection = document.getElementById("testConnection");
 
   els.favoriteNode = document.getElementById("favoriteNode");
   els.favoriteLabel = document.getElementById("favoriteLabel");
@@ -85,6 +86,7 @@ function bindElements() {
 
 function bindEvents() {
   els.toggleApiKey.addEventListener("click", handleToggleApiKey);
+  els.testConnection.addEventListener("click", handleTestConnection);
   els.addFavorite.addEventListener("click", handleAddFavorite);
   els.saveSettings.addEventListener("click", handleSaveSettings);
   els.resetSettings.addEventListener("click", handleResetSettings);
@@ -190,7 +192,7 @@ async function handleResetSettings() {
     els.favoriteLabel.value = "";
 
     await loadSettings();
-    notifyPanelFavoritesChanged();
+    notifySettingsChanged();
     setStatus("Settings reset.", "success", 2000);
   } catch (error) {
     console.error(error);
@@ -203,6 +205,45 @@ function handleToggleApiKey() {
 
   els.apiKey.type = showing ? "password" : "text";
   els.toggleApiKey.textContent = showing ? "Show API Key" : "Hide API Key";
+}
+
+// Tests against the CURRENT form values, not saved storage, and saves
+// nothing -- lets the owner verify a base URL/API key pair before committing.
+async function handleTestConnection() {
+  let baseUrl;
+  try {
+    baseUrl = validateBaseUrl(els.baseUrl.value);
+  } catch (error) {
+    setStatus(error.message, "error");
+    return;
+  }
+
+  const apiKey = els.apiKey.value.trim();
+  if (!apiKey) {
+    setStatus("API key is required.", "error");
+    return;
+  }
+
+  const hasPermission = await ensureHostPermission(baseUrl);
+  if (!hasPermission) {
+    setStatus("Chrome host permission was not granted.", "error");
+    return;
+  }
+
+  setStatus("Testing connection…", "");
+  const startedAt = Date.now();
+
+  try {
+    const client = new AslAgentClient({ baseUrl, apiKey });
+    const [status, version] = await Promise.all([client.getStatus(), client.getVersion()]);
+    const elapsedMs = Date.now() - startedAt;
+    const node = status?.node || "?";
+    const backendVersion = version?.version || version?.app_version || version?.backend_version || "unknown";
+    setStatus(`Connected: node ${node}, backend v${backendVersion}, ${elapsedMs}ms`, "success");
+  } catch (error) {
+    console.error(error);
+    setStatus(error.message, "error");
+  }
 }
 
 function handleFavoriteEnterKey(event) {
@@ -246,7 +287,7 @@ async function handleAddFavorite() {
 
   try {
     await storageSet({ favorites: sanitizeFavorites(state.favorites) });
-    notifyPanelFavoritesChanged();
+    notifySettingsChanged();
     setStatus("Favorite saved.", "success", 2000);
   } catch (error) {
     console.error(error);
@@ -272,7 +313,7 @@ async function handleFavoritesListClick(event) {
 
   try {
     await storageSet({ favorites: sanitizeFavorites(state.favorites) });
-    notifyPanelFavoritesChanged();
+    notifySettingsChanged();
     setStatus("Favorite removed.", "success", 2000);
   } catch (error) {
     console.error(error);
@@ -428,9 +469,9 @@ function hasChromePermissionsApi() {
   );
 }
 
-function notifyPanelFavoritesChanged() {
+function notifySettingsChanged() {
   if (typeof chrome !== "undefined" && chrome.runtime) {
-    chrome.runtime.sendMessage({ type: "FAVORITES_CHANGED" }).catch(() => {
+    chrome.runtime.sendMessage({ type: "SETTINGS_CHANGED" }).catch(() => {
       // Panel may not be open -- ignore.
     });
   }
@@ -475,7 +516,7 @@ async function handleAddMacro() {
   els.macroSequence.value = "";
   renderMacros();
   await storageSet({ dtmfMacros: state.dtmfMacros });
-  notifyPanelFavoritesChanged();
+  notifySettingsChanged();
   setStatus("Macro saved.", "success", 2000);
 }
 
@@ -487,7 +528,7 @@ async function handleMacrosListClick(event) {
   state.dtmfMacros.splice(idx, 1);
   renderMacros();
   await storageSet({ dtmfMacros: state.dtmfMacros });
-  notifyPanelFavoritesChanged();
+  notifySettingsChanged();
   setStatus("Macro removed.", "success", 2000);
 }
 
@@ -547,7 +588,7 @@ async function handleAddSchedule() {
   state.schedules.push(schedule);
   renderSchedules();
   await storageSet({ schedules: state.schedules });
-  notifyPanelFavoritesChanged();
+  notifySettingsChanged();
   setStatus("Schedule saved.", "success", 2000);
 }
 
@@ -558,7 +599,7 @@ async function handleSchedulesListClick(event) {
     state.schedules = state.schedules.filter((s) => s.id !== id);
     renderSchedules();
     await storageSet({ schedules: state.schedules });
-    notifyPanelFavoritesChanged();
+    notifySettingsChanged();
     setStatus("Schedule removed.", "success", 2000);
     return;
   }
@@ -570,7 +611,7 @@ async function handleSchedulesListClick(event) {
       s.enabled = !s.enabled;
       renderSchedules();
       await storageSet({ schedules: state.schedules });
-      notifyPanelFavoritesChanged();
+      notifySettingsChanged();
     }
   }
 }
@@ -742,7 +783,7 @@ async function handleScreenReaderToggle() {
     els.screenReaderMode.setAttribute("aria-checked", String(enabled));
   }
   await storageSet({ screenReaderMode: enabled });
-  chrome.runtime.sendMessage({ type: "FAVORITES_CHANGED" }).catch(() => {});
+  notifySettingsChanged();
   chrome.runtime.sendMessage({ type: "A11Y_CHANGED", screenReaderMode: enabled }).catch(() => {});
   setStatus(
     enabled ? "Screen reader mode enabled. Reload the panel to apply." : "Screen reader mode disabled.",
