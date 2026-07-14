@@ -11,65 +11,96 @@
 
 <body>
   <main class="app-shell" role="main">
-    <header class="status-header" aria-labelledby="app-title">
-      <div class="title-row">
-        <div>
-          <h1 id="app-title">ASL Node Panel</h1>
-          <p id="connectionStatus" class="muted">Not connected</p>
-        </div>
 
+    <!-- ═══════════════ ZONE 1: THE DISPLAY (fixed, never scrolls) ═══════════════ -->
+    <header class="bezel" role="banner" aria-labelledby="app-title">
+      <div class="bezel-top">
+        <div class="bezel-brand">
+          <h1 id="app-title"><span id="bezelNode">ASL —</span></h1>
+          <span id="bezelCallsign" class="bezel-callsign"></span>
+        </div>
         <div class="header-actions">
-          <button id="toggleMode" class="icon-button mode-toggle-btn" type="button" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
-            ☀
+          <button type="button" class="live-lamp" id="liveLamp" data-kind="offline" title="Retry live connection">
+            <i aria-hidden="true"></i>
+            <span id="liveLampText">Offline</span>
           </button>
-          <button id="openSettings" class="icon-button" type="button" title="Open settings" aria-label="Open settings">
-            ⚙
-          </button>
+          <button id="toggleMode" class="icon-button mode-toggle-btn" type="button" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">☀</button>
+          <button id="openSettings" class="icon-button" type="button" title="Open settings" aria-label="Open settings">⚙</button>
         </div>
       </div>
+      <p id="connectionStatus" class="sr-only">Not connected</p>
 
-      <section class="node-summary" aria-label="Node status summary">
-        <div class="summary-card">
-          <span class="summary-label" id="lbl-node">Node</span>
-          <strong id="statusNode" aria-labelledby="lbl-node">—</strong>
-        </div>
-
-        <div class="summary-card">
-          <span class="summary-label" id="lbl-callsign">Callsign</span>
-          <strong id="statusCallsign" aria-labelledby="lbl-callsign">—</strong>
-        </div>
-
-        <div class="summary-card">
-          <span class="summary-label" id="lbl-keyups">Keyups Today</span>
-          <strong id="statusKeyups" aria-labelledby="lbl-keyups">—</strong>
+      <div class="glass" id="glass" data-state="standby">
+        <div class="glass-row1">
+          <div class="glass-state">
+            <span class="glass-lamp" id="glassLamp" aria-hidden="true"></span>
+            <span class="glass-word" id="glassWord" role="status">Standby</span>
+          </div>
+          <span class="glass-mode" id="glassMode">Monitoring</span>
         </div>
 
-        <div class="summary-card">
-          <span class="summary-label" id="lbl-connected">Connected Nodes</span>
-          <strong id="statusConnectedCount" aria-labelledby="lbl-connected">—</strong>
+        <div class="glass-main">
+          <!-- standby: shack clock -->
+          <div class="glass-clock" id="glassClock" hidden>
+            <div class="clock-utc"><span id="clockTime">00:00:00</span> <small>UTC</small></div>
+            <div class="clock-watch" id="clockWatch">Net watch</div>
+          </div>
+
+          <!-- inbound: remote talker -->
+          <div class="glass-inbound" id="glassInbound" hidden>
+            <div class="inbound-call" id="inboundCall">—</div>
+            <div class="inbound-sub">
+              <span class="inbound-node" id="inboundNode"></span>
+              <span class="inbound-via" id="inboundVia"></span>
+              <span class="inbound-timer" id="inboundTimer">0:00</span>
+            </div>
+          </div>
+
+          <!-- outbound: operator + TOT ring -->
+          <div class="glass-outbound" id="glassOutbound" hidden>
+            <div class="outbound-who">
+              <div class="outbound-call" id="outboundCall">—</div>
+              <div class="outbound-sub" id="outboundSub"></div>
+              <div class="outbound-tot-label" id="outboundTotLabel">TOT</div>
+            </div>
+            <div class="tot-ring" id="totRing" title="">
+              <div class="tot-ring-face">
+                <span class="tot-ring-t" id="totRingTime">--:--</span>
+                <span class="tot-ring-s">remain</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-duplex-note" id="duplexNote" hidden>+ inbound</div>
         </div>
-      <div class="summary-card active-node-card">
-          <span class="summary-label" id="lbl-active-node">Active TX</span>
-          <strong id="activeNodeNumber" aria-labelledby="lbl-active-node">—</strong>
-          <span id="activeNodeCallsign" class="active-node-callsign" hidden></span>
+
+        <div class="glass-ribbon" id="ribbon" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
         </div>
-        <div class="summary-card keyed-card">
-          <span id="statusRxKeyed" class="keyed-badge rx"></span>
-          <span id="statusTxKeyed" class="keyed-badge tx"></span>
+
+        <div class="glass-links-row">
+          <div class="glass-links" id="linkBar" role="group" aria-label="Connected nodes"></div>
+          <button id="disconnectAll" class="danger small link-disconnect-all" type="button">Disc All</button>
         </div>
-      </section>
-      <div class="connected-to-bar">
-        <span class="connected-to-label">Connected To</span>
-        <span id="connectedToNode" class="connected-to-node">—</span>
-        <span id="connectedToCallsign" class="connected-to-callsign" hidden></span>
-      </div>
-      <div class="node-stats-row">
-        <div class="stat-pill"><span class="stat-label">TX Today</span><span id="statusTxToday">—</span></div>
-        <div class="stat-pill"><span class="stat-label">TX Total</span><span id="statusTxTotal">—</span></div>
-        <div class="stat-pill"><span class="stat-label">Uptime</span><span id="statusUptime">—</span></div>
-        <div id="nodeCountWarningBadge" class="node-count-warning" hidden>⚠ HIGH CONN</div>
+
+        <div class="glass-stats" id="microStats">
+          <div><span class="k">Links</span><span class="v" id="statLinks">—</span></div>
+          <div><span class="k">Keyups</span><span class="v" id="statKeyups">—</span></div>
+          <div><span class="k">TX Day</span><span class="v" id="statTxDay">—</span></div>
+          <div><span class="k">Up</span><span class="v" id="statUptime">—</span></div>
+          <span id="nodeCountWarningBadge" class="node-count-warning" hidden>⚠</span>
+        </div>
       </div>
     </header>
+
+    <div id="busyMessage" class="busy-message" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="busyText">Working…</span>
+    </div>
+
+    <!-- Old body sections below are being migrated zone by zone; each stays
+         fully wired until its replacement zone lands, so the panel is always
+         loadable and functional mid-rebuild. -->
 
     <section class="panel-section" aria-labelledby="toggle-connect">
       <div class="section-title-row">
@@ -112,27 +143,6 @@
 
       <div id="favoritesList" class="favorites-list">
         <div class="empty-state">No favorites configured.</div>
-      </div>
-      </div>
-    </section>
-
-    <section class="panel-section connected-section" aria-labelledby="toggle-connected">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-connected" aria-expanded="true" aria-controls="connected-body">Connected Nodes <span class="toggle-icon">▾</span></button>
-        <div class="section-actions">
-          <button id="refreshStatus" class="small secondary" type="button">Refresh</button>
-          <button id="disconnectAll" class="small danger" type="button">Disconnect All</button>
-        </div>
-      </div>
-      <div class="section-body" id="connected-body">
-
-      <div id="busyMessage" class="busy-message" hidden>
-        <span class="spinner" aria-hidden="true"></span>
-        <span id="busyText">Working…</span>
-      </div>
-
-      <div id="connectedNodesList" class="connected-nodes-list">
-        <div class="empty-state">No connected nodes loaded yet.</div>
       </div>
       </div>
     </section>
@@ -192,7 +202,6 @@
       </div>
     </section>
 
-    <div id="scheduleIndicator" class="schedule-indicator" hidden></div>
     <div id="srAnnouncer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
     <div id="srAnnouncerAssertive" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
     <footer class="footer-status">

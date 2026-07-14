@@ -88,6 +88,21 @@
 
   --font-mono: 'Share Tech Mono', 'Courier New', monospace;
   --font-head: 'Oswald', 'Impact', sans-serif;
+
+  /* ── Faceplate type scale (v0.9) -- tabular-nums wherever digits align ─────── */
+  --fs-hero:  1.8rem;   /* talker callsign / standby clock */
+  --fs-lg:    1.05rem;  /* outbound callsign */
+  --fs-sm:    0.72rem;  /* sub-lines */
+  --fs-micro: 0.6rem;   /* uppercase tracked labels only, floor size */
+
+  /* ── Faceplate roles (v0.9) -- sensible fallbacks so all six existing
+     presets + custom render the new display correctly without edits. The
+     "instrument" preset below overrides these with its own values. ──────── */
+  --lamp-rx:  var(--success); /* outbound (operator keyed) lamp/readout color */
+  --lamp-tx:  var(--amber);   /* inbound (remote keyed) lamp/readout color */
+  --glass:    var(--panel-inset);
+  --etch:     var(--muted);
+  --etch-dim: var(--faint);
 }
 
 /* ── Signal Corps preset ────────────────────────────────────────────────────── */
