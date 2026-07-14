@@ -66,7 +66,6 @@ async function init() {
   applyCollapsedSections();
   renderDtmfMacros();
   renderScheduleIndicator();
-  startScheduleChecker();
   startAutoRefresh();
   startEventStream();
 }
@@ -329,6 +328,16 @@ function bindMessages() {
           renderScheduleIndicator();
           applyAccessibilityMode();
         }).catch(console.error);
+        return;
+      }
+      if (message?.type === "SCHEDULE_FIRED") {
+        const label = describeScheduleAction(message.schedule);
+        if (message.ok) {
+          setFooter(`Schedule: ${label} fired.`, "success", 4000);
+        } else {
+          setFooter(`Schedule failed: ${label} (${message.error})`, "error");
+        }
+        refreshAll({ manual: false, force: true, silent: true });
       }
     });
   }
@@ -1178,66 +1187,11 @@ function renderFavoritesStatus() {
 }
 
 // ---------------------------------------------------------------------------
-// Schedule checker
+// Schedule indicator
+// Execution now lives in background.js (chrome.alarms) so schedules fire
+// even while the panel is closed; this file only displays what's next and
+// reacts to the SCHEDULE_FIRED message the worker sends after each run.
 // ---------------------------------------------------------------------------
-
-let scheduleCheckerTimer = null;
-
-function startScheduleChecker() {
-  stopScheduleChecker();
-  scheduleCheckerTimer = window.setInterval(checkSchedules, 30000);
-  checkSchedules();
-}
-
-function stopScheduleChecker() {
-  if (scheduleCheckerTimer) { window.clearInterval(scheduleCheckerTimer); scheduleCheckerTimer = null; }
-}
-
-function checkSchedules() {
-  if (!state.schedules.length) return;
-  const now = new Date();
-  const utcDay = now.getUTCDay();
-  const utcHour = now.getUTCHours();
-  const utcMinute = now.getUTCMinutes();
-  for (const schedule of state.schedules) {
-    if (!schedule.enabled) continue;
-    if (!schedule.days.includes(utcDay)) continue;
-    if (schedule.hour !== utcHour) continue;
-    if (Math.abs(schedule.minute - utcMinute) > 1) continue;
-    const key = `sched_last_${schedule.id}`;
-    const lastFired = Number(sessionStorage.getItem(key) || 0);
-    const nowMs = Date.now();
-    if (nowMs - lastFired < 90000) continue;
-    sessionStorage.setItem(key, String(nowMs));
-    executeSchedule(schedule);
-  }
-}
-
-async function executeSchedule(schedule) {
-  if (!isReady()) return;
-  try {
-    if (schedule.action === "disconnect-all") {
-      await disconnectAll();
-      setFooter(`Schedule: Disconnect All fired.`, "success", 4000);
-    } else if (schedule.action === "disconnect") {
-      if (!schedule.node) {
-        setFooter("Schedule failed: disconnect schedule has no node.", "error");
-        return;
-      }
-      await disconnectNode(schedule.node);
-      setFooter(`Schedule: Disconnected ${schedule.node}.`, "success", 4000);
-    } else {
-      const monitorOnly = schedule.mode === "monitor";
-      await connectNode(schedule.node, { monitorOnly });
-      setFooter(`Schedule: Connected to ${schedule.node}.`, "success", 4000);
-    }
-    await sleep(3000);
-    await refreshAll({ manual: false, force: true, silent: true });
-  } catch (error) {
-    console.error("Schedule execution failed:", error);
-    setFooter(`Schedule failed: ${error.message}`, "error");
-  }
-}
 
 function renderScheduleIndicator() {
   if (!state.schedules.length) { els.scheduleIndicator.hidden = true; return; }
@@ -1251,6 +1205,12 @@ function renderScheduleIndicator() {
   }).slice(0, 2).join(" | ");
   els.scheduleIndicator.textContent = `⏱ ${next}`;
   els.scheduleIndicator.hidden = false;
+}
+
+function describeScheduleAction(schedule) {
+  if (schedule.action === "disconnect-all") return "Disconnect All";
+  if (schedule.action === "disconnect") return `Disconnect ${schedule.node}`;
+  return `Connect to ${schedule.node}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1323,7 +1283,6 @@ function cleanup() {
   stopAutoRefresh();
   stopSlowPoll();
   stopEventStream();
-  stopScheduleChecker();
   window.clearTimeout(state.footerTimer);
 }
 

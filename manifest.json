@@ -7,14 +7,16 @@
   "permissions": [
     "storage",
     "sidePanel",
-    "windows"
+    "windows",
+    "alarms"
   ],
   "optional_host_permissions": [
     "http://*/*",
     "https://*/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "options_page": "options.html",
   "side_panel": {

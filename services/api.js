@@ -140,7 +140,7 @@ export class AslEventStream {
 
   _scheduleReconnect() {
     this._clearReconnectTimer();
-    this._reconnectTimer = window.setTimeout(() => {
+    this._reconnectTimer = globalThis.setTimeout(() => {
       if (!this._closed) {
         this._reconnectDelay = Math.min(this._reconnectDelay * 2, 30000);
         this._openSource();
@@ -150,7 +150,7 @@ export class AslEventStream {
 
   _clearReconnectTimer() {
     if (this._reconnectTimer) {
-      window.clearTimeout(this._reconnectTimer);
+      globalThis.clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
   }
@@ -168,7 +168,8 @@ export async function createEventStreamFromSettings() {
 }
 
 // ---------------------------------------------------------------------------
-// REST client (unchanged)
+// REST client (uses globalThis timers so it also works inside the
+// background service worker, which has no `window`)
 // ---------------------------------------------------------------------------
 
 export class AslAgentClient {
@@ -216,7 +217,7 @@ export class AslAgentClient {
     const method = options.method || "GET";
     const url = buildUrl(this.baseUrl, path);
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeoutId = globalThis.setTimeout(() => controller.abort(), this.timeoutMs);
 
     const headers = { "x-api-key": this.apiKey, "Accept": "application/json" };
     const fetchOptions = { method, headers, cache: "no-store", credentials: "omit", signal: controller.signal };
@@ -240,7 +241,7 @@ export class AslAgentClient {
       if (error instanceof AslAgentApiError) throw error;
       throw new AslAgentApiError(`ASL Agent request failed: ${error.message}`, { url });
     } finally {
-      window.clearTimeout(timeoutId);
+      globalThis.clearTimeout(timeoutId);
     }
   }
 }
