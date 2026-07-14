@@ -3,7 +3,7 @@
 import { getSettings, isConfigured, storageSet, normalizeSchedules } from "./services/storage.js";
 import { loadAndApplyTheme, applyTheme, watchThemeChanges } from "./services/theme.js";
 import { totState, formatCountdown, formatHold } from "./services/tot.js";
-import { computeNextSchedule, formatNextScheduleLine, diffKeyedSets } from "./services/activity.js";
+import { computeNextSchedule, formatNextScheduleLine, diffKeyedSets, computeBusyPercent } from "./services/activity.js";
 import { createTape } from "./services/tape.js";
 import {
   getStatus,
@@ -77,6 +77,8 @@ const state = {
   remoteKeyedSince: {},       // node -> epoch ms, for keyup hold times
   tapeSeeded: false,          // /audit seeded into the tape exactly once
   tapeSaveTimer: null,
+  // ── Dock (Zone 3) ──
+  openDrawer: null,           // drawer element id, or null
 };
 
 const els = {};
@@ -327,6 +329,12 @@ function bindElements() {
   els.dtmfInput = requireElement("dtmfInput");
   els.sendDtmf = requireElement("sendDtmf");
 
+  // Dock (Zone 3)
+  els.dock = document.querySelector(".dock");
+  els.kpGrid = requireElement("kpGrid");
+  els.disconnectFirst = requireElement("disconnectFirst");
+  els.memCount = requireElement("memCount");
+
   els.footerMessage = requireElement("footerMessage");
 }
 
@@ -366,15 +374,19 @@ function bindEvents() {
   els.connectNodeInput.addEventListener("input", handleNodeLookupInput);
   els.toggleMode.addEventListener("click", handleToggleMode);
 
-  document.querySelectorAll(".section-toggle").forEach((btn) => {
-    btn.addEventListener("click", handleSectionToggle);
+  // Dock: each key toggles its drawer (one open at a time)
+  if (els.dock) els.dock.addEventListener("click", handleDockClick);
+  document.querySelectorAll("[data-drawer-close]").forEach((btn) => {
+    btn.addEventListener("click", () => closeDrawers({ restoreFocus: true }));
   });
+  els.kpGrid.addEventListener("click", handleKeypadClick);
+  els.disconnectFirst.addEventListener("change", handleDisconnectFirstChange);
 
-  // Popover dismissal: Escape and outside-click
+  // Popover + drawer dismissal: Escape and outside-click
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && state.openPopover) {
-      closePopover({ restoreFocus: true });
-    }
+    if (event.key !== "Escape") return;
+    if (state.openPopover) { closePopover({ restoreFocus: true }); return; }
+    if (state.openDrawer) closeDrawers({ restoreFocus: true });
   });
   document.addEventListener("click", (event) => {
     if (!state.openPopover) return;
@@ -476,6 +488,7 @@ async function loadSettingsIntoState() {
   state.schedules = normalizeSchedules(Array.isArray(settings.schedules) ? settings.schedules : []);
   state.nodeCountWarning = Number(settings.nodeCountWarning) || 0;
   state.screenReaderMode = Boolean(settings.screenReaderMode);
+  if (els.disconnectFirst) els.disconnectFirst.checked = Boolean(settings.disconnectFirst);
   applyAccessibilityMode();
 }
 
@@ -1237,51 +1250,120 @@ function closePopover({ restoreFocus }) {
 }
 
 // ---------------------------------------------------------------------------
-// Favorites (relocates into the Memories drawer in the Dock zone)
+// Dock + drawers (Zone 3)
+// ---------------------------------------------------------------------------
+
+function handleDockClick(event) {
+  const key = event.target.closest(".dockkey");
+  if (!key) return;
+  const id = key.dataset.drawer;
+  if (state.openDrawer === id) { closeDrawers({ restoreFocus: true }); return; }
+  openDrawer(id);
+}
+
+function openDrawer(id) {
+  closeDrawers({ restoreFocus: false });
+  const drawer = document.getElementById(id);
+  const key = els.dock?.querySelector(`.dockkey[data-drawer="${id}"]`);
+  if (!drawer) return;
+  drawer.hidden = false;
+  if (key) key.setAttribute("aria-expanded", "true");
+  state.openDrawer = id;
+  // Move focus to the first control in the drawer for keyboard users.
+  const focusable = drawer.querySelector("input, button");
+  if (focusable) focusable.focus();
+}
+
+function closeDrawers({ restoreFocus }) {
+  if (!state.openDrawer) return;
+  const id = state.openDrawer;
+  const drawer = document.getElementById(id);
+  const key = els.dock?.querySelector(`.dockkey[data-drawer="${id}"]`);
+  if (drawer) drawer.hidden = true;
+  if (key) {
+    key.setAttribute("aria-expanded", "false");
+    if (restoreFocus) key.focus();
+  }
+  state.openDrawer = null;
+}
+
+function handleKeypadClick(event) {
+  const key = event.target.closest(".kp-key");
+  if (!key) return;
+  if (els.dtmfInput.value.length >= 30) return;
+  els.dtmfInput.value += key.textContent;
+  els.dtmfInput.focus();
+}
+
+async function handleDisconnectFirstChange() {
+  try { await storageSet({ disconnectFirst: Boolean(els.disconnectFirst.checked) }); }
+  catch { /* non-critical */ }
+}
+
+// ---------------------------------------------------------------------------
+// Memories (favorites) -- rendered as channel-memory cards in the Dock zone
 // ---------------------------------------------------------------------------
 
 function renderFavorites() {
   els.favoritesList.replaceChildren();
+  if (els.memCount) els.memCount.textContent = state.favorites.length ? `${state.favorites.length} saved` : "none";
 
   if (!state.favorites.length) {
-    els.favoritesList.appendChild(createEmptyState("No favorites configured."));
+    els.favoritesList.appendChild(createEmptyState("No memories configured."));
     return;
   }
 
   for (const favorite of state.favorites) {
     const item = document.createElement("div");
-    item.className = "favorite-item";
+    item.className = "mem";
+    item.dataset.favoriteNode = favorite.node;
 
-    const node = document.createElement("div");
-    node.className = "node-number";
-    node.textContent = favorite.node;
+    const head = document.createElement("div");
+    head.className = "mem-head";
+    const lamp = document.createElement("i");
+    lamp.className = "mem-lamp";
+    lamp.setAttribute("aria-hidden", "true");
+    const name = document.createElement("span");
+    name.className = "mem-name";
+    name.textContent = favorite.label || favorite.node;
+    name.title = favorite.label || favorite.node;
+    head.append(lamp, name);
 
-    const label = document.createElement("div");
-    label.className = "node-label";
-    label.textContent = favorite.label || favorite.node;
-    label.title = favorite.label || favorite.node;
+    const meta = document.createElement("div");
+    meta.className = "mem-meta";
+    const num = document.createElement("span");
+    num.className = "mem-node";
+    num.textContent = favorite.node;
+    const status = document.createElement("span");
+    status.className = "favorite-status";
+    status.textContent = "--";
+    meta.append(num, status);
+
+    const meter = document.createElement("div");
+    meter.className = "mem-meter";
+    const fill = document.createElement("i");
+    meter.appendChild(fill);
 
     const actions = document.createElement("div");
-    actions.className = "favorite-actions";
-
+    actions.className = "mem-actions";
     const connectT = document.createElement("button");
     connectT.type = "button";
-    connectT.textContent = "Connect T";
+    connectT.className = "small";
+    connectT.textContent = "Conn T";
     connectT.dataset.favoriteNode = favorite.node;
     connectT.dataset.favoriteMode = "transceive";
-
     const connectR = document.createElement("button");
     connectR.type = "button";
-    connectR.className = "secondary";
-    connectR.textContent = "Monitor R";
+    connectR.className = "small secondary";
+    connectR.textContent = "Mon R";
     connectR.dataset.favoriteNode = favorite.node;
     connectR.dataset.favoriteMode = "monitor";
-
     actions.append(connectT, connectR);
-    item.dataset.favoriteNode = favorite.node;
-    item.append(node, label, actions);
+
+    item.append(head, meta, meter, actions);
     els.favoritesList.appendChild(item);
   }
+  renderFavoritesStatus();
 }
 
 // ---------------------------------------------------------------------------
@@ -1359,13 +1441,23 @@ function handleOpenSettings() {
   window.open("options.html", "_blank", "noopener");
 }
 
+// AllScan-style "disconnect current links first": drop everything, pause
+// briefly for the node to settle, then connect the target.
+async function maybeDisconnectFirst() {
+  if (!els.disconnectFirst?.checked) return;
+  await disconnectAll();
+  await sleep(500);
+}
+
 function handleConnectFromInput(monitorOnly) {
   const node = els.connectNodeInput.value.trim();
   runTimedOperation({
     busyText: monitorOnly ? `Connecting to ${node} in monitor-only mode…` : `Connecting to ${node} in transceive mode…`,
     action: async () => {
+      await maybeDisconnectFirst();
       await connectNode(node, { monitorOnly });
       els.connectNodeInput.value = "";
+      closeDrawers({ restoreFocus: false });
     },
     successMessage: monitorOnly ? `Monitor-only connect request sent for node ${node}.` : `Transceive connect request sent for node ${node}.`
   });
@@ -1379,7 +1471,9 @@ function handleFavoritesClick(event) {
   runTimedOperation({
     busyText: monitorOnly ? `Connecting favorite ${node} in monitor-only mode…` : `Connecting favorite ${node} in transceive mode…`,
     action: async () => {
+      await maybeDisconnectFirst();
       await connectNode(node, { monitorOnly });
+      closeDrawers({ restoreFocus: false });
     },
     successMessage: monitorOnly ? `Monitor-only connect request sent for favorite ${node}.` : `Transceive connect request sent for favorite ${node}.`
   });
@@ -1675,7 +1769,8 @@ async function fetchFavoriteStats(nodeNumber) {
     if (!data) return null;
     return {
       linkedCount: Array.isArray(data.links) ? data.links.length : 0,
-      keyed: Boolean(data.keyed)
+      keyed: Boolean(data.keyed),
+      busyPct: computeBusyPercent(data.totaltxtime, data.apprptuptime)
     };
   } catch { return null; }
 }
@@ -1699,20 +1794,31 @@ async function refreshFavoritesStatus() {
 }
 
 function renderFavoritesStatus() {
-  const items = els.favoritesList.querySelectorAll(".favorite-item");
+  const items = els.favoritesList.querySelectorAll(".mem");
   items.forEach((item) => {
     const node = item.dataset.favoriteNode;
     if (!node) return;
     const stats = favoritesStatusCache[node];
-    let badge = item.querySelector(".favorite-status");
-    if (!badge) { badge = document.createElement("div"); badge.className = "favorite-status"; item.appendChild(badge); }
-    if (stats) {
-      badge.textContent = `${stats.linkedCount} linked${stats.keyed ? " · KEYED" : ""}`;
-      badge.className = `favorite-status${stats.keyed ? " keyed" : ""}`;
-    } else {
-      badge.textContent = "--";
-      badge.className = "favorite-status";
+    const badge = item.querySelector(".favorite-status");
+    const fill = item.querySelector(".mem-meter i");
+    const connected = state.connectedNodes.some((n) => n.node === node);
+
+    // Lamp: amber if this memory is currently a connected link, green if the
+    // node is up/reporting to the stats API, off otherwise.
+    item.classList.toggle("conn", connected);
+    item.classList.toggle("up", !connected && Boolean(stats));
+
+    if (badge) {
+      if (stats) {
+        const busy = stats.busyPct == null ? "" : `busy ${Math.round(stats.busyPct)}% · `;
+        badge.textContent = `${busy}${stats.linkedCount}L${stats.keyed ? " · KEYED" : ""}`;
+        badge.className = `favorite-status${stats.keyed ? " keyed" : ""}`;
+      } else {
+        badge.textContent = connected ? "connected" : "--";
+        badge.className = "favorite-status";
+      }
     }
+    if (fill) fill.style.width = stats && stats.busyPct != null ? `${Math.round(stats.busyPct)}%` : "0%";
   });
 }
 

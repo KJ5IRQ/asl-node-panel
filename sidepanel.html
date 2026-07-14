@@ -116,92 +116,67 @@
          fully wired until its replacement zone lands, so the panel is always
          loadable and functional mid-rebuild. -->
 
-    <section class="panel-section" aria-labelledby="toggle-connect">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-connect" aria-expanded="true" aria-controls="connect-body">Connect Node <span class="toggle-icon">▾</span></button>
-      </div>
-      <div class="section-body" id="connect-body">
+    <!-- ═══════════════ ZONE 3: THE DOCK + DRAWERS (fixed bottom) ═══════════════ -->
+    <div class="dock-zone">
 
-      <form id="connectForm" class="connect-form" aria-label="Connect to a node">
-        <label class="sr-only" for="connectNodeInput">Node number</label>
-        <input
-          id="connectNodeInput"
-          type="text"
-          inputmode="numeric"
-          placeholder="Enter node number"
-          autocomplete="off"
-          spellcheck="false"
-        />
-
-        <div id="nodeLookupResult" class="node-lookup-result" hidden></div>
-
-        <div class="button-row">
-          <button id="connectTransceive" type="submit" data-connect-mode="transceive">
-            Connect T
-          </button>
-
-          <button id="connectMonitor" class="secondary" type="button" data-connect-mode="monitor">
-            Monitor R
-          </button>
-        </div>
-      </form>
+      <!-- Connect drawer -->
+      <div class="drawer" id="drawer-connect" role="region" aria-label="Connect node" hidden>
+        <div class="drawer-head"><span class="drawer-title">Connect Node</span><button type="button" class="drawer-close" data-drawer-close aria-label="Close">✕</button></div>
+        <form id="connectForm" class="connect-form" aria-label="Connect to a node">
+          <label class="sr-only" for="connectNodeInput">Node number</label>
+          <input id="connectNodeInput" type="text" inputmode="numeric" placeholder="Enter node number" autocomplete="off" spellcheck="false" />
+          <div id="nodeLookupResult" class="node-lookup-result" hidden></div>
+          <div class="button-row">
+            <button id="connectTransceive" type="submit" data-connect-mode="transceive">Connect T</button>
+            <button id="connectMonitor" class="secondary" type="button" data-connect-mode="monitor">Monitor R</button>
+          </div>
+          <label class="disc-first"><input type="checkbox" id="disconnectFirst" /> Disconnect current links first</label>
+        </form>
       </div>
-    </section>
 
-    <section class="panel-section" aria-labelledby="toggle-favorites">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-favorites" aria-expanded="true" aria-controls="favorites-body">Favorites <span class="toggle-icon">▾</span></button>
-        <button id="refreshFavorites" class="small secondary" type="button">Refresh</button>
-      </div>
-      <div class="section-body" id="favorites-body">
-
-      <div id="favoritesList" class="favorites-list">
-        <div class="empty-state">No favorites configured.</div>
-      </div>
-      </div>
-    </section>
-
-    <section class="panel-section" aria-labelledby="toggle-cop">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-cop" aria-expanded="true" aria-controls="cop-body">COP Controls <span class="toggle-icon">▾</span></button>
-      </div>
-      <div class="section-body" id="cop-body">
-        <div class="cop-grid">
-          <button id="copIdentify" type="button">Identify</button>
-          <button id="copTime" type="button" class="secondary">Time</button>
-          <button id="copStatus" type="button" class="secondary">Status</button>
-          <button id="copVersion" type="button" class="secondary">Version</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel-section" aria-labelledby="toggle-dtmf">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-dtmf" aria-expanded="true" aria-controls="dtmf-body">DTMF <span class="toggle-icon">▾</span></button>
-      </div>
-      <div class="section-body" id="dtmf-body">
+      <!-- Keypad drawer -->
+      <div class="drawer" id="drawer-keypad" role="region" aria-label="DTMF keypad" hidden>
+        <div class="drawer-head"><span class="drawer-title">DTMF Keypad</span><button type="button" class="drawer-close" data-drawer-close aria-label="Close">✕</button></div>
+        <form id="dtmfForm" class="dtmf-strip" aria-label="Send DTMF sequence">
+          <label class="sr-only" for="dtmfInput">DTMF sequence</label>
+          <input id="dtmfInput" type="text" placeholder="Sequence" autocomplete="off" spellcheck="false" />
+          <button id="sendDtmf" type="submit">Send</button>
+        </form>
         <div id="dtmfMacrosGrid" class="dtmf-macros-grid"></div>
-
-      <form id="dtmfForm" class="dtmf-form" aria-label="Send DTMF sequence">
-        <label class="sr-only" for="dtmfInput">DTMF sequence</label>
-        <input
-          id="dtmfInput"
-          type="text"
-          placeholder="DTMF sequence"
-          autocomplete="off"
-          spellcheck="false"
-        />
-
-        <button id="sendDtmf" type="submit">
-          Send
-        </button>
-      </form>
-
-      <p class="hint">
-        DTMF requests are sent with <code>confirmed: true</code>.
-      </p>
+        <div class="kp-grid" id="kpGrid" role="group" aria-label="Keypad">
+          <button type="button" class="kp-key">1</button><button type="button" class="kp-key">2</button><button type="button" class="kp-key">3</button><button type="button" class="kp-key">A</button>
+          <button type="button" class="kp-key">4</button><button type="button" class="kp-key">5</button><button type="button" class="kp-key">6</button><button type="button" class="kp-key">B</button>
+          <button type="button" class="kp-key">7</button><button type="button" class="kp-key">8</button><button type="button" class="kp-key">9</button><button type="button" class="kp-key">C</button>
+          <button type="button" class="kp-key">*</button><button type="button" class="kp-key">0</button><button type="button" class="kp-key">#</button><button type="button" class="kp-key">D</button>
+        </div>
       </div>
-    </section>
+
+      <!-- Memories drawer -->
+      <div class="drawer" id="drawer-memories" role="region" aria-label="Memories" hidden>
+        <div class="drawer-head"><span class="drawer-title">Memories</span><button id="refreshFavorites" class="small secondary" type="button">Refresh</button></div>
+        <div id="favoritesList" class="mem-grid">
+          <div class="empty-state">No memories configured.</div>
+        </div>
+      </div>
+
+      <!-- COP drawer -->
+      <div class="drawer" id="drawer-cop" role="region" aria-label="Control operator commands" hidden>
+        <div class="drawer-head"><span class="drawer-title">COP · Control Operator</span><button type="button" class="drawer-close" data-drawer-close aria-label="Close">✕</button></div>
+        <div class="cop-grid">
+          <button id="copIdentify" type="button"><b>F1</b>Ident</button>
+          <button id="copTime" type="button" class="secondary"><b>F2</b>Time</button>
+          <button id="copStatus" type="button" class="secondary"><b>F3</b>Status</button>
+          <button id="copVersion" type="button" class="secondary"><b>F4</b>Version</button>
+        </div>
+      </div>
+
+      <div class="dock" role="group" aria-label="Controls">
+        <button type="button" class="dockkey" data-drawer="drawer-connect" aria-expanded="false" aria-controls="drawer-connect">Connect<small>node #</small></button>
+        <button type="button" class="dockkey" data-drawer="drawer-keypad" aria-expanded="false" aria-controls="drawer-keypad">Keypad<small>DTMF</small></button>
+        <button type="button" class="dockkey" data-drawer="drawer-memories" aria-expanded="false" aria-controls="drawer-memories">Memories<small id="memCount">saved</small></button>
+        <button type="button" class="dockkey" data-drawer="drawer-cop" aria-expanded="false" aria-controls="drawer-cop">COP<small>F1–F4</small></button>
+      </div>
+    </div>
 
     <div id="srAnnouncer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
     <div id="srAnnouncerAssertive" class="sr-only" aria-live="assertive" aria-atomic="true"></div>

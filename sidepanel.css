@@ -907,3 +907,192 @@ code { color: var(--accent); font-family: var(--font-mono); }
 .t-row.live .t-text { color: var(--success); }
 .t-row[data-k="out"].live .t-time,
 .t-row[data-k="out"].live .t-text { color: var(--amber); }
+
+/* ═══════════════ ZONE 3: DOCK + DRAWERS ═══════════════ */
+.dock-zone { margin-bottom: 40px; } /* clear the fixed footer */
+
+.dock {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+
+.dockkey {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 9px 2px 7px;
+  font-family: var(--font-head);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--panel-strong);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.dockkey small {
+  font-size: 0.5rem;
+  color: var(--faint);
+  letter-spacing: 0.05em;
+}
+
+.dockkey:hover:not(:disabled) { border-color: var(--accent); color: var(--text-bright); }
+
+.dockkey[aria-expanded="true"] {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent-hover);
+}
+.dockkey[aria-expanded="true"] small { color: var(--accent-text); opacity: 0.8; }
+
+.drawer {
+  padding: 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.drawer-title {
+  font-family: var(--font-head);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.drawer-close {
+  padding: 2px 7px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.disc-first {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  font-size: 0.66rem;
+  color: var(--muted);
+}
+.disc-first input { width: auto; }
+
+/* Keypad */
+.dtmf-strip { display: flex; gap: 6px; margin-bottom: 8px; }
+.dtmf-strip input { flex: 1; }
+.dtmf-strip button { flex-shrink: 0; }
+
+.kp-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.kp-key {
+  padding: 10px 0;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  text-align: center;
+  color: var(--text);
+  background: var(--panel-inset);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.kp-key:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.kp-key:active { transform: translateY(1px); }
+
+/* Memories */
+.mem-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.mem {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--panel-inset);
+}
+
+.mem-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+
+.mem-lamp {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--faint);
+  flex-shrink: 0;
+}
+.mem.up .mem-lamp   { background: var(--success); box-shadow: 0 0 5px var(--success); }
+.mem.conn .mem-lamp { background: var(--amber); box-shadow: 0 0 5px var(--amber); }
+
+.mem-name {
+  font-family: var(--font-head);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mem-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.6rem;
+}
+.mem-node { color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.mem .favorite-status { color: var(--faint); letter-spacing: 0.02em; }
+.mem .favorite-status.keyed { color: var(--amber); font-weight: 700; }
+
+.mem-meter {
+  height: 4px;
+  border-radius: 3px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+.mem-meter i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--amber));
+  transition: width 0.3s;
+}
+
+.mem-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+
+/* COP function keys */
+.cop-grid button b {
+  display: block;
+  font-size: 0.55rem;
+  color: var(--amber);
+  font-weight: 700;
+  margin-bottom: 2px;
+}
