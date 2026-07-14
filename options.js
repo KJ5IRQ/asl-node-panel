@@ -9,6 +9,7 @@ import {
   isValidNodeNumber,
 } from "./services/storage.js";
 import { normalizeDtmfSequence } from "./services/api.js";
+import { applyTheme } from "./services/theme.js";
 
 const STORAGE_KEYS = ["baseUrl", "apiKey", "favorites", "refreshInterval", "collapsedSections", "dtmfMacros", "schedules", "nodeCountWarning", "themeSettings", "screenReaderMode"];
 
@@ -77,7 +78,6 @@ function bindElements() {
   els.customColorsSection = document.getElementById("customColorsSection");
   els.colorPickerGrid = document.getElementById("colorPickerGrid");
   els.resetCustomColors = document.getElementById("resetCustomColors");
-  els.themePreview = document.getElementById("themePreview");
   els.saveSettings = document.getElementById("saveSettings");
   els.resetSettings = document.getElementById("resetSettings");
   els.statusMessage = document.getElementById("statusMessage");
@@ -121,6 +121,7 @@ async function loadSettings() {
     state.schedules = Array.isArray(settings.schedules) ? settings.schedules : [];
     state.themeSettings = settings.themeSettings || { preset: "system", mode: "dark", customColors: {} };
     state.screenReaderMode = Boolean(settings.screenReaderMode);
+    document.documentElement.setAttribute("data-a11y", state.screenReaderMode ? "on" : "off");
     if (els.screenReaderMode) {
       els.screenReaderMode.checked = state.screenReaderMode;
       els.screenReaderMode.setAttribute("aria-checked", String(state.screenReaderMode));
@@ -662,7 +663,6 @@ function loadThemeUI() {
   updateThemeModeVisibility();
   updateCustomColorsVisibility();
   updateColorPickerValues();
-  applyPreviewTheme();
 }
 
 function updateThemeModeVisibility() {
@@ -701,7 +701,7 @@ async function handleThemeChange() {
   updateThemeModeVisibility();
   updateCustomColorsVisibility();
   updateColorPickerValues();
-  applyPreviewTheme();
+  applyTheme(state.themeSettings);
   await storageSet({ themeSettings: state.themeSettings });
   chrome.runtime.sendMessage({ type: "THEME_CHANGED" }).catch(() => {});
 }
@@ -715,10 +715,10 @@ function handleCustomColorChange(event) {
     ...state.themeSettings,
     customColors: { ...(state.themeSettings.customColors || {}), [key]: val }
   };
-  // Live preview is instant; persisting to sync storage is debounced so
-  // dragging the color picker doesn't blow through the ~120 writes/min quota.
-  document.documentElement.style.setProperty(key, val);
-  applyPreviewTheme();
+  // Live preview is instant (the whole settings page restyles, not just a
+  // preview box); persisting to sync storage is debounced so dragging the
+  // color picker doesn't blow through the ~120 writes/min quota.
+  applyTheme(state.themeSettings);
   window.clearTimeout(state.customColorSaveTimer);
   state.customColorSaveTimer = window.setTimeout(() => {
     storageSet({ themeSettings: state.themeSettings }).catch(console.error);
@@ -729,62 +729,15 @@ function handleCustomColorChange(event) {
 async function handleResetCustomColors() {
   state.themeSettings = { ...state.themeSettings, customColors: {} };
   updateColorPickerValues();
-  applyPreviewTheme();
+  applyTheme(state.themeSettings);
   await storageSet({ themeSettings: state.themeSettings });
   chrome.runtime.sendMessage({ type: "THEME_CHANGED" }).catch(() => {});
 }
 
-function applyPreviewTheme() {
-  // Apply to the preview div directly
-  const preview = els.themePreview;
-  if (!preview) return;
-  const preset = state.themeSettings?.preset || "system";
-  const mode = state.themeSettings?.mode || "dark";
-  const cc = state.themeSettings?.customColors || {};
-
-  // Set preview colors inline
-  const PRESET_COLORS = {
-    sigcorps: { dark: { bg:"#1a1a0f", panel:"#1e1e10", text:"#c8c49a", accent:"#5c6630", amber:"#d4a017" },
-                light: { bg:"#f0ead8", panel:"#e8e0c8", text:"#2a2810", accent:"#4a5228", amber:"#a07010" } },
-    navy:     { dark: { bg:"#0a0e1a", panel:"#0f1629", text:"#c8d4e8", accent:"#3b82f6", amber:"#60a5fa" },
-                light: { bg:"#f0f4ff", panel:"#e4eaf8", text:"#0a1030", accent:"#1d4ed8", amber:"#2563eb" } },
-    slate:    { dark: { bg:"#0f172a", panel:"#1e293b", text:"#e2e8f0", accent:"#38bdf8", amber:"#38bdf8" },
-                light: { bg:"#f8fafc", panel:"#f1f5f9", text:"#0f172a", accent:"#0284c7", amber:"#0284c7" } },
-    highcontrast: { dark: { bg:"#000000", panel:"#0a0a0a", text:"#ffffff", accent:"#00ff88", amber:"#ffdd00" },
-                    light: { bg:"#ffffff", panel:"#f0f0f0", text:"#000000", accent:"#0055cc", amber:"#884400" } },
-    desert:   { dark: { bg:"#1a1208", panel:"#231a0c", text:"#e8d8b0", accent:"#c87020", amber:"#e09030" },
-                light: { bg:"#fdf6e8", panel:"#f5e8cc", text:"#2a1808", accent:"#904010", amber:"#804000" } },
-  };
-
-  let colors;
-  if (preset === "custom") {
-    colors = { bg: cc["--bg"], panel: cc["--panel"], text: cc["--text"], accent: cc["--accent"], amber: cc["--amber"] };
-  } else if (preset === "system") {
-    const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    colors = dark
-      ? { bg:"#0f172a", panel:"#1e293b", text:"#e2e8f0", accent:"#38bdf8", amber:"#38bdf8" }
-      : { bg:"#f8fafc", panel:"#f1f5f9", text:"#0f172a", accent:"#0284c7", amber:"#0284c7" };
-  } else {
-    colors = PRESET_COLORS[preset]?.[mode] || PRESET_COLORS.slate.dark;
-  }
-
-  if (colors.bg) preview.style.background = colors.bg;
-  const bar = preview.querySelector(".preview-bar");
-  const pnl = preview.querySelector(".preview-panel");
-  const txt = preview.querySelector(".preview-text");
-  const mut = preview.querySelector(".preview-muted");
-  const acc = preview.querySelector(".preview-accent");
-  if (bar) bar.style.background = colors.accent || "#38bdf8";
-  if (pnl) pnl.style.background = colors.panel || "#1e293b";
-  if (txt) txt.style.color = colors.text || "#e2e8f0";
-  if (mut) mut.style.color = colors.amber || "#38bdf8";
-  if (acc) acc.style.color = colors.accent || "#38bdf8";
-}
-
-
 async function handleScreenReaderToggle() {
   const enabled = Boolean(els.screenReaderMode?.checked);
   state.screenReaderMode = enabled;
+  document.documentElement.setAttribute("data-a11y", enabled ? "on" : "off");
   if (els.screenReaderMode) {
     els.screenReaderMode.setAttribute("aria-checked", String(enabled));
   }

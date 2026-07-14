@@ -5,6 +5,7 @@
   <meta name="color-scheme" content="light dark" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ASL Node Panel</title>
+  <link rel="stylesheet" href="themes.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Oswald:wght@400;600;700&display=swap" />
@@ -73,7 +74,7 @@
       </div>
     </header>
 
-    <section class="panel-section" aria-labelledby="connect-title">
+    <section class="panel-section" aria-labelledby="toggle-connect">
       <div class="section-title-row">
         <button class="section-toggle" id="toggle-connect" aria-expanded="true" aria-controls="connect-body">Connect Node <span class="toggle-icon">▾</span></button>
       </div>
@@ -105,20 +106,20 @@
       </div>
     </section>
 
-    <section class="panel-section" aria-labelledby="favorites-title">
+    <section class="panel-section" aria-labelledby="toggle-favorites">
       <div class="section-title-row">
         <button class="section-toggle" id="toggle-favorites" aria-expanded="true" aria-controls="favorites-body">Favorites <span class="toggle-icon">▾</span></button>
         <button id="refreshFavorites" class="small secondary" type="button">Refresh</button>
       </div>
       <div class="section-body" id="favorites-body">
 
-      <div id="favoritesList" class="favorites-list" aria-live="polite">
+      <div id="favoritesList" class="favorites-list">
         <div class="empty-state">No favorites configured.</div>
       </div>
       </div>
     </section>
 
-    <section class="panel-section connected-section" aria-labelledby="connected-title">
+    <section class="panel-section connected-section" aria-labelledby="toggle-connected">
       <div class="section-title-row">
         <button class="section-toggle" id="toggle-connected" aria-expanded="true" aria-controls="connected-body">Connected Nodes <span class="toggle-icon">▾</span></button>
         <div class="section-actions">
@@ -133,13 +134,13 @@
         <span id="busyText">Working…</span>
       </div>
 
-      <div id="connectedNodesList" class="connected-nodes-list" aria-live="polite">
+      <div id="connectedNodesList" class="connected-nodes-list">
         <div class="empty-state">No connected nodes loaded yet.</div>
       </div>
       </div>
     </section>
 
-    <section class="panel-section" aria-labelledby="cop-title" aria-label="Courtesy-operation-position controls">
+    <section class="panel-section" aria-labelledby="toggle-cop" aria-label="Control operator (COP) commands">
       <div class="section-title-row">
         <button class="section-toggle" id="toggle-cop" aria-expanded="true" aria-controls="cop-body">COP Controls <span class="toggle-icon">▾</span></button>
       </div>
@@ -153,7 +154,7 @@
       </div>
     </section>
 
-    <section class="panel-section" aria-labelledby="dtmf-title">
+    <section class="panel-section" aria-labelledby="toggle-dtmf">
       <div class="section-title-row">
         <button class="section-toggle" id="toggle-dtmf" aria-expanded="true" aria-controls="dtmf-body">DTMF <span class="toggle-icon">▾</span></button>
       </div>
@@ -181,14 +182,14 @@
       </div>
     </section>
 
-    <section class="panel-section audit-section" aria-labelledby="audit-title">
+    <section class="panel-section audit-section" aria-labelledby="toggle-audit">
       <div class="section-title-row">
         <button class="section-toggle" id="toggle-audit" aria-expanded="true" aria-controls="audit-body">Audit Log <span class="toggle-icon">▾</span></button>
         <button id="refreshAudit" class="small secondary" type="button">Refresh</button>
       </div>
       <div class="section-body" id="audit-body">
 
-      <div id="auditLog" class="audit-log" aria-live="polite">
+      <div id="auditLog" class="audit-log">
         <div class="empty-state">No audit entries loaded yet.</div>
       </div>
       </div>

@@ -519,11 +519,13 @@ function renderKeyedIndicators() {
   const rxKeyed = Boolean(state.variables?.rxkeyed);
   els.statusRxKeyed.textContent = "RX";
   els.statusRxKeyed.className = rxKeyed ? "keyed-badge rx active" : "keyed-badge rx";
+  els.statusRxKeyed.setAttribute("aria-label", rxKeyed ? "RX active, receiving" : "RX idle");
 
   // TX -- node transmitter is active (node is transmitting OUT)
   const txKeyed = Boolean(state.variables?.txkeyed);
   els.statusTxKeyed.textContent = "TX";
   els.statusTxKeyed.className = txKeyed ? "keyed-badge tx active" : "keyed-badge tx";
+  els.statusTxKeyed.setAttribute("aria-label", txKeyed ? "TX active, transmitting" : "TX idle");
 }
 
 function clearStatusHeader() {
@@ -533,8 +535,10 @@ function clearStatusHeader() {
   els.statusConnectedCount.textContent = "—";
   els.statusRxKeyed.textContent = "RX";
   els.statusRxKeyed.className = "keyed-badge rx";
+  els.statusRxKeyed.setAttribute("aria-label", "RX idle");
   els.statusTxKeyed.textContent = "TX";
   els.statusTxKeyed.className = "keyed-badge tx";
+  els.statusTxKeyed.setAttribute("aria-label", "TX idle");
   els.statusUptime.textContent = "—";
   els.statusTxToday.textContent = "—";
   els.statusTxTotal.textContent = "—";
@@ -908,6 +912,13 @@ function updateControlAvailability() {
   const controls = document.querySelectorAll("button, input");
   for (const control of controls) {
     if (control.id === "openSettings") { control.disabled = false; continue; }
+    // Section toggles and the theme toggle stay usable even when unconfigured
+    // or busy -- otherwise keyboard users can't even collapse sections before
+    // configuring the extension, a keyboard trap.
+    if (control.id === "toggleMode" || control.classList.contains("section-toggle")) {
+      control.disabled = false;
+      continue;
+    }
     if (control.id === "refreshFavorites") { control.disabled = state.busy; continue; }
     control.disabled = state.busy || !configured;
   }
