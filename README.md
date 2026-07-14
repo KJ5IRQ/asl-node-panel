@@ -2,8 +2,8 @@
 
 A Chrome side panel extension for monitoring and controlling your AllStarLink node via [ASL3-API](https://github.com/KJ5IRQ/asl3-api). Connects to a FastAPI-based REST middleware running on your ASL3 Raspberry Pi.
 
-**Current version:** v0.6.2  
-**Backend required:** ASL3-API v1.3.0+ running on your Pi
+**Current version:** v0.8.0  
+**Backend required:** ASL3-API v1.4.1+ running on your Pi
 
 ---
 
@@ -38,12 +38,22 @@ A Chrome side panel extension for monitoring and controlling your AllStarLink no
 ### Node Status
 - Live node number, callsign, keyups today, connected node count, and uptime
 - TX time today and TX time total
-- Real-time KEYED indicator (pulses amber when `rxkeyed` is true)
+- RX/TX keyed badges: always visible, dim when idle, lit when active
+- Active TX card: shows which connected node is currently passing audio
 - Node count warning threshold — alerts when connected count exceeds a configurable limit
+
+### Live Events (SSE)
+- Real-time status via `GET /events` on backend v1.4+, with automatic fallback
+  to polling on older backends, a wrong API key, or a flaky connection
+- Status line shows Live when the stream is connected, and degrades to a
+  clear "polling" message instead of retrying forever when SSE can't be used
+- A manual Refresh retries the live connection if it isn't already up
 
 ### Connect & Control
 - Connect to any node by number in Transceive or Monitor-only mode
 - Node lookup: type a node number and see callsign + location before connecting
+- Connected To bar: shows the node this session actually connected to
+- Per-node Disconnect button on each row in Connected Nodes
 - Disconnect All with confirmation dialog
 - Favorites list with one-tap Connect T / Monitor R buttons
 - Favorites show live status (linked count, keyed state) from the ASL stats API
@@ -55,15 +65,25 @@ A Chrome side panel extension for monitoring and controlling your AllStarLink no
 
 ### Schedules
 - Auto-connect or auto-disconnect on a weekly schedule (day + UTC time)
+- Run in the background service worker via `chrome.alarms`, so they fire
+  even while the side panel is closed (Chrome itself still has to be running)
 - Toggle individual schedules on/off without deleting them
 - Next scheduled event shown as a persistent indicator in the panel
 
 ### Connected Nodes
 - Live list of connected nodes with mode badge (T/R) and callsign when available
 - Callsign and location populated from enriched `/nodes?enrich=true` endpoint
+- Per-node Disconnect button, no confirmation dialog (single-link action)
 
 ### Audit Log
 - Last 50 audit entries from the node, auto-refreshed
+
+### Settings
+- Test Connection button: verifies the base URL and API key currently typed
+  into the form (not what's saved) against `/status` and `/version` before
+  you save anything
+- Actionable errors: an unconfigured panel or a 401/403 API response shows
+  an Open Settings button right in the error message
 
 ### Themes
 - **System Default** — follows OS `prefers-color-scheme` automatically via CSS `light-dark()`
@@ -78,18 +98,20 @@ A Chrome side panel extension for monitoring and controlling your AllStarLink no
 - Theme applies to both the panel and settings page
 
 ### Accessibility
-- **Screen Reader Mode** (in Settings > Accessibility)
+- **Screen Reader Mode** (in Settings > Accessibility), applies to both the panel and the settings page
 - When enabled: ARIA live regions announce status changes and errors to NVDA, JAWS, VoiceOver, or ChromeVox
 - All summary cards have `aria-labelledby` associations
 - `role="main"` landmark, `role="switch"` on the accessibility toggle
-- Enhanced focus rings and enlarged touch targets when enabled
+- Enhanced focus rings and 44x44 minimum touch targets when enabled
+- RX/TX keyed state is never color-only: each badge has an `aria-label`
+- Keyed state colors, muted, and faint text meet WCAG AA contrast (>= 4.5:1) in every preset except High Contrast, which already passes AAA
 
 ---
 
 ## Requirements
 
-- Chrome 116+
-- [ASL3-API](https://github.com/KJ5IRQ/asl3-api) v1.3.0+ running on your ASL3 Pi
+- Chrome 123+
+- [ASL3-API](https://github.com/KJ5IRQ/asl3-api) v1.4.1+ running on your ASL3 Pi
 - Your Pi's local IP and the API key from your ASL3-API config
 
 ---
@@ -111,20 +133,30 @@ A Chrome side panel extension for monitoring and controlling your AllStarLink no
 
 ```
 asl-node-panel/
-  manifest.json           Extension manifest (v3), v0.6.2
-  background.js           Service worker, side panel registration
+  manifest.json           Extension manifest (v3), v0.8.0
+  background.js           Service worker (module): side panel registration,
+                           schedule execution via chrome.alarms
   sidepanel.html          Panel UI
   sidepanel.js            Panel logic, state, accessibility engine
-  sidepanel.css           Panel styles, all themes via CSS variables + light-dark()
+  sidepanel.css           Panel-specific styles (layout, components)
+  themes.css              Shared theme palettes, [data-a11y] rules, and
+                           bundled @font-face declarations; loaded first
+                           by both sidepanel.html and options.html
   options.html            Settings page UI
-  options.js              Settings logic
+  options.js              Settings logic (ES module)
   options.css             Settings page styles
+  fonts/                  Bundled Share Tech Mono / Oswald woff2 files
   assets/                 Screenshots and demo GIF
   services/
     api.js                ASL3-API client (all endpoints)
-    storage.js            chrome.storage.sync schema and normalizers
-    theme.js              Theme engine
+    storage.js            chrome.storage.sync schema, normalizers, and
+                           validators shared by the panel and settings page
+    theme.js              Theme engine (applyTheme, load/watch helpers)
     theme-init.js         Theme initializer for options page (CSP-safe)
+  tests/
+    api.test.mjs          Validators and parsers in services/api.js
+    storage.test.mjs      Validators and normalizers in services/storage.js
+    contrast.test.mjs     WCAG AA contrast floor, parsed live from themes.css
 ```
 
 ---
@@ -139,13 +171,17 @@ asl-node-panel/
 | `GET /audit` | Audit log entries |
 | `GET /lookup/{node}` | Node lookup by number |
 | `GET /version` | API version info |
+| `GET /capabilities` | Backend feature probe, gates whether SSE is attempted (v1.4+) |
+| `GET /events` | Live event stream (SSE), `api_key` passed as a query parameter |
 | `POST /cop/identify` | Play node ID |
 | `POST /cop/time` | Say current time |
 | `POST /cop/status` | Say system status |
 | `POST /cop/version` | Say app_rpt version |
-| `POST /connect/{node}` | Connect to a node |
+| `POST /connect` | Connect to a node, JSON body `{node, monitor_only}` |
+| `POST /disconnect` | Disconnect one node, JSON body `{node}` |
 | `POST /disconnect-all` | Disconnect all connected nodes |
-| `POST /dtmf` | Send a DTMF sequence |
+| `POST /dtmf` | Send a DTMF sequence, JSON body `{sequence, confirmed}` |
+| `POST /macro` | Run a numbered macro, JSON body `{macro_number}` |
 
 ---
 
@@ -164,6 +200,9 @@ asl-node-panel/
 | v0.6.0 | Accessibility: Screen Reader Mode, ARIA live regions |
 | v0.6.1 | Fix screen reader mode propagation |
 | v0.6.2 | Fix inline script CSP violation on options page |
+| v0.7.0 | Wire SSE stream, live RX/TX keyed badges, structured audit entries |
+| v0.7.1 | Fix RX/TX badge always-visible behavior and label mapping |
+| v0.8.0 | Correctness/a11y audit pass: fixed schedule disconnect, favorites live status, shared themes.css, WCAG AA contrast, options page theming; Test Connection, per-node disconnect, actionable errors, gated SSE with polling fallback, bundled fonts; schedules moved to the background service worker. See CHANGELOG.md. |
 
 ---
 
