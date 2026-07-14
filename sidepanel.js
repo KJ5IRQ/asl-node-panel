@@ -2,8 +2,9 @@
 
 import { getSettings, isConfigured, storageSet, normalizeSchedules } from "./services/storage.js";
 import { loadAndApplyTheme, applyTheme, watchThemeChanges } from "./services/theme.js";
-import { totState, formatCountdown } from "./services/tot.js";
-import { computeNextSchedule, formatNextScheduleLine } from "./services/activity.js";
+import { totState, formatCountdown, formatHold } from "./services/tot.js";
+import { computeNextSchedule, formatNextScheduleLine, diffKeyedSets } from "./services/activity.js";
+import { createTape } from "./services/tape.js";
 import {
   getStatus,
   getConnectedNodes,
@@ -68,6 +69,14 @@ const state = {
   clockTimer: null,
   inboundTimer: null,
   openPopover: null,         // { el, node }
+  // ── Traffic tape (Zone 2) ──
+  tape: createTape(200),
+  tapeFilter: "all",
+  tapeInit: false,           // adopt the first keyed set without emitting history
+  prevActiveLinks: new Set(),
+  remoteKeyedSince: {},       // node -> epoch ms, for keyup hold times
+  tapeSeeded: false,          // /audit seeded into the tape exactly once
+  tapeSaveTimer: null,
 };
 
 const els = {};
@@ -82,6 +91,8 @@ async function init() {
   bindEvents();
   bindMessages();
 
+  await hydrateTape();
+  renderTape();
   await loadInitialState();
   applyCollapsedSections();
   renderDtmfMacros();
@@ -165,19 +176,21 @@ async function startEventStream() {
     stream.on("node.variables.snapshot", (data) => {
       if (data.variables) {
         state.variables = data.variables;
-        state.activeLinks = parseActiveLinks(state.variables?.active_links);
+        syncActiveLinks(parseActiveLinks(state.variables?.active_links));
         updateOnAirState();
         renderLinkBar();
       }
     });
 
-    stream.on("link.connected", () => {
-      // Refresh node list when a link connects
+    stream.on("link.connected", (data) => {
+      const node = data?.node ? String(data.node) : "";
+      pushTape({ kind: "link", node, text: `${node || "Node"} connected` });
       refreshNodesAndStatus({ silent: true });
     });
 
-    stream.on("link.disconnected", () => {
-      // Refresh node list when a link disconnects
+    stream.on("link.disconnected", (data) => {
+      const node = data?.node ? String(data.node) : "";
+      pushTape({ kind: "drop", node, text: `${node || "Node"} disconnected` });
       refreshNodesAndStatus({ silent: true });
     });
 
@@ -285,6 +298,10 @@ function bindElements() {
   els.statUptime = requireElement("statUptime");
   els.nodeCountWarningBadge = requireElement("nodeCountWarningBadge");
 
+  // Traffic tape (Zone 2)
+  els.tape = requireElement("tape");
+  els.tapeFilters = document.querySelector(".tape-filters");
+
   // Legacy sections (migrate in later zones)
   els.nodeLookupResult = requireElement("nodeLookupResult");
   els.dtmfMacrosGrid = requireElement("dtmfMacrosGrid");
@@ -310,9 +327,6 @@ function bindElements() {
   els.dtmfInput = requireElement("dtmfInput");
   els.sendDtmf = requireElement("sendDtmf");
 
-  els.refreshAudit = requireElement("refreshAudit");
-  els.auditLog = requireElement("auditLog");
-
   els.footerMessage = requireElement("footerMessage");
 }
 
@@ -333,7 +347,7 @@ function bindEvents() {
   });
 
   els.refreshFavorites.addEventListener("click", handleRefreshFavorites);
-  els.refreshAudit.addEventListener("click", () => refreshAudit({ manual: true }));
+  if (els.tapeFilters) els.tapeFilters.addEventListener("click", handleTapeFilter);
 
   els.favoritesList.addEventListener("click", handleFavoritesClick);
   els.disconnectAll.addEventListener("click", handleDisconnectAll);
@@ -398,6 +412,7 @@ function bindMessages() {
       }
       if (message?.type === "SCHEDULE_FIRED") {
         const label = describeScheduleAction(message.schedule);
+        pushTape({ kind: "sched", text: message.ok ? `${label} fired ok` : `${label} failed: ${message.error}` });
         if (message.ok) {
           setFooter(`Schedule: ${label} fired.`, "success", 4000);
         } else {
@@ -432,7 +447,7 @@ async function loadInitialState() {
 
     if (!isReady()) {
       clearBezelAndStats();
-      renderEmptyAudit("Configure ASL Agent settings first.");
+      renderTape();
       setConnectionStatus("Not configured");
       setLiveLamp("offline", "Offline");
       setFooter("Open settings to add your ASL Agent base URL and API key.", "warning", 0, { settingsLink: true });
@@ -487,7 +502,7 @@ async function refreshAll(options = {}) {
 
   if (!isReady()) {
     clearBezelAndStats();
-    renderEmptyAudit("Configure ASL Agent settings first.");
+    renderTape();
     setConnectionStatus("Not configured");
     setLiveLamp("offline", "Offline");
     updateControlAvailability();
@@ -534,7 +549,7 @@ async function refreshAll(options = {}) {
 
   if (variablesResult.status === "fulfilled") {
     state.variables = variablesResult.value;
-    state.activeLinks = parseActiveLinks(state.variables?.active_links);
+    syncActiveLinks(parseActiveLinks(state.variables?.active_links));
     updateOnAirState();
     renderLinkBar();
   } else {
@@ -542,13 +557,20 @@ async function refreshAll(options = {}) {
     console.error(variablesResult.reason);
   }
 
+  // The tape is seeded from /audit once for pre-panel-open history; live
+  // events append on top after that. seedFromAudit de-dupes, so a missed
+  // first seed just fills in on the next successful poll.
   if (auditResult.status === "fulfilled") {
-    renderAudit(auditResult.value);
+    if (!state.tapeSeeded) {
+      state.tape.seedFromAudit(auditResult.value?.entries);
+      state.tapeSeeded = true;
+      renderTape();
+      scheduleTapeSave();
+    }
   } else {
     hadError = true;
     if (isAuthError(auditResult.reason)) authError = true;
     console.error(auditResult.reason);
-    renderEmptyAudit(`Failed to load audit log: ${auditResult.reason.message}`);
   }
 
   renderBezelAndStats();
@@ -573,22 +595,6 @@ async function refreshAll(options = {}) {
   updateControlAvailability();
 }
 
-async function refreshAudit(options = {}) {
-  const { manual = false, force = false, silent = false } = options;
-
-  if (state.busy && !force) return;
-  if (!isReady()) { renderEmptyAudit("Configure ASL Agent settings first."); return; }
-
-  try {
-    const audit = await getAudit(AUDIT_LINES);
-    renderAudit(audit);
-    if (manual && !silent) setFooter("Audit log refreshed.", "success", 2000);
-  } catch (error) {
-    console.error(error);
-    renderEmptyAudit(`Failed to load audit log: ${error.message}`);
-    if (!silent) setFooter(error.message, "error", 0, { settingsLink: isAuthError(error) });
-  }
-}
 
 // ---------------------------------------------------------------------------
 // On-air state machine (Display zone)
@@ -618,8 +624,8 @@ function updateOnAirState() {
     return;
   }
 
-  if (rx && !state.keyedRx) armTot(Date.now());       // keyup: (re-)arm at full
-  if (!rx && state.keyedRx) disarmTot();               // unkey: clear
+  if (rx && !state.keyedRx) { armTot(Date.now()); pushOutStart(); }  // keyup: (re-)arm + log
+  if (!rx && state.keyedRx) { finalizeOut(); disarmTot(); }          // unkey: log then clear
   if (tx && !state.keyedTx) state.inboundSince = Date.now();
   if (!tx && state.keyedTx) {
     state.inboundSince = null;
@@ -803,6 +809,10 @@ function totTick() {
   if (phase === "expired" && !state.tot.expired) {
     state.tot.expired = true;
     stopTotTimer(); // CSS carries the alarm pulse; nothing left to count
+    pushTape({
+      kind: "tot", node: "__local__",
+      text: `${state.status?.callsign || "You"} timeout reached · ${formatCountdown(totSeconds())}`
+    });
     if (state.settings?.totBeep) {
       beep(1400, 120);
       window.setTimeout(() => beep(1400, 120), 200);
@@ -848,6 +858,155 @@ function renderTotRing(remain, phase) {
   els.totRing.style.setProperty("--tot-pct", String(seconds > 0 ? remain / seconds : 0));
   els.totRingTime.textContent = phase === "expired" ? "TOT" : formatCountdown(remain);
   els.totRing.title = `Timeout timer: ${formatCountdown(remain)} remaining of ${formatCountdown(seconds)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Traffic tape (Zone 2) -- one chronological event stream. The tape module
+// (services/tape.js) holds the data; this layer feeds it, renders it, and
+// persists it to session storage so a panel reload mid-net keeps history.
+// ---------------------------------------------------------------------------
+
+const TAPE_TAGS = {
+  key: "Key", out: "You", link: "Link", drop: "Drop",
+  dtmf: "DTMF", cop: "COP", sched: "Sched", sys: "Sys", tot: "TOT",
+};
+
+// Diff the keyed set against the previous one, logging remote keyups/unkeys.
+// The first call adopts the current set without emitting rows (timer honesty:
+// a node already keyed when the panel opens has an unknown hold time).
+function syncActiveLinks(nextSet) {
+  const next = nextSet instanceof Set ? nextSet : new Set(nextSet || []);
+
+  if (!state.tapeInit) {
+    state.tapeInit = true;
+    state.prevActiveLinks = next;
+    state.activeLinks = next;
+    return;
+  }
+
+  const { newlyKeyed, newlyUnkeyed } = diffKeyedSets(state.prevActiveLinks, next);
+  const now = Date.now();
+  let changed = false;
+
+  for (const node of newlyKeyed) {
+    state.remoteKeyedSince[node] = now;
+    const callsign = talkerCallsign(node);
+    state.tape.push({ ts: now, kind: "key", node, callsign, live: true, text: keyRowText(node, callsign) });
+    changed = true;
+  }
+  for (const node of newlyUnkeyed) {
+    const since = state.remoteKeyedSince[node];
+    const holdMs = since ? now - since : undefined;
+    delete state.remoteKeyedSince[node];
+    const callsign = talkerCallsign(node);
+    const held = holdMs != null ? ` · ${formatHold(holdMs)}` : "";
+    state.tape.finalize("key", node, { ts: now, holdMs, text: `${keyRowText(node, callsign, false)}${held}` });
+    changed = true;
+  }
+
+  state.prevActiveLinks = next;
+  state.activeLinks = next;
+  if (changed) { renderTape(); scheduleTapeSave(); }
+}
+
+function talkerCallsign(node) {
+  return state.connectedNodes.find((n) => n.node === node)?.callsign || "";
+}
+
+function keyRowText(node, callsign, keyedSuffix = true) {
+  const who = callsign ? `${callsign} ${node}` : node;
+  return keyedSuffix ? `${who} · keyed` : who;
+}
+
+// Operator's own transmission (rxkeyed) start/finish rows.
+function pushOutStart() {
+  const call = state.status?.callsign || "You";
+  state.tape.push({ ts: Date.now(), kind: "out", node: "__local__", callsign: call, live: true, text: `${call} outbound · TOT armed` });
+  renderTape();
+  scheduleTapeSave();
+}
+
+function finalizeOut() {
+  const call = state.status?.callsign || "You";
+  const holdMs = state.tot.armedAtMs ? Date.now() - state.tot.armedAtMs : undefined;
+  const held = holdMs != null ? ` · ${formatHold(holdMs)}` : "";
+  const outcome = state.tot.expired ? " · TIMED OUT" : " · TOT ok";
+  state.tape.finalize("out", "__local__", { ts: Date.now(), holdMs, text: `${call} outbound${held}${outcome}` });
+  renderTape();
+  scheduleTapeSave();
+}
+
+function pushTape(entry) {
+  state.tape.push(entry);
+  renderTape();
+  scheduleTapeSave();
+}
+
+function renderTape() {
+  if (!els.tape) return;
+  const rows = state.tape.list(state.tapeFilter);
+  const scrollTop = els.tape.scrollTop;
+  els.tape.replaceChildren();
+
+  if (!rows.length) {
+    els.tape.appendChild(createEmptyState("No traffic yet."));
+    return;
+  }
+
+  for (const entry of rows) {
+    const row = document.createElement("div");
+    row.className = entry.live ? "t-row live" : "t-row";
+    row.dataset.k = entry.kind;
+
+    const time = document.createElement("span");
+    time.className = "t-time";
+    time.textContent = entry.live ? "now" : tapeTime(entry.ts);
+
+    const tag = document.createElement("span");
+    tag.className = "t-tag";
+    tag.textContent = TAPE_TAGS[entry.kind] || entry.kind;
+
+    const text = document.createElement("span");
+    text.className = "t-text";
+    text.textContent = entry.text;
+
+    row.append(time, tag, text);
+    els.tape.appendChild(row);
+  }
+  els.tape.scrollTop = scrollTop;
+}
+
+function tapeTime(ts) {
+  const d = new Date(ts);
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}:${String(d.getUTCSeconds()).padStart(2, "0")}`;
+}
+
+function handleTapeFilter(event) {
+  const btn = event.target.closest(".tf");
+  if (!btn) return;
+  state.tapeFilter = btn.dataset.filter || "all";
+  els.tapeFilters.querySelectorAll(".tf").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+  renderTape();
+}
+
+// Persist the newest entries to session storage (survives a panel reload
+// within the browser session, does not roam, does not burn sync quota).
+function scheduleTapeSave() {
+  if (state.tapeSaveTimer) return;
+  state.tapeSaveTimer = window.setTimeout(async () => {
+    state.tapeSaveTimer = null;
+    // Strip the live flag so a row that was mid-keyup at save time does not
+    // reload as a permanently "now" row after a panel reload.
+    const snapshot = state.tape.toJSON().map((entry) => ({ ...entry, live: false }));
+    try { await chrome.storage.session.set({ tapeEntries: snapshot }); } catch { /* non-critical */ }
+  }, 1000);
+}
+
+async function hydrateTape() {
+  try {
+    const result = await chrome.storage.session.get({ tapeEntries: null });
+    if (Array.isArray(result.tapeEntries)) state.tape.hydrate(result.tapeEntries);
+  } catch { /* non-critical */ }
 }
 
 // ── Standby clock + watch line ──────────────────────────────────────────────
@@ -1125,39 +1284,6 @@ function renderFavorites() {
   }
 }
 
-function renderAudit(audit) {
-  const entries = Array.isArray(audit?.entries) ? audit.entries : [];
-
-  els.auditLog.replaceChildren();
-
-  if (!entries.length) {
-    els.auditLog.appendChild(createEmptyState("No audit entries."));
-    return;
-  }
-
-  for (const entry of entries) {
-    const row = document.createElement("div");
-    row.className = "audit-entry";
-    // Handle both structured (v1.4+) and raw string (legacy) entries
-    if (entry && typeof entry === "object" && entry.timestamp) {
-      const d = new Date(entry.timestamp);
-      const time = Number.isNaN(d.getTime())
-        ? entry.timestamp
-        : d.toISOString().slice(0, 19).replace("T", " ") + " Z";
-      const cmd  = entry.command || "";
-      const det  = entry.details ? ` — ${entry.details}` : "";
-      row.textContent = `${time}  ${cmd}${det}`;
-    } else {
-      row.textContent = String(entry);
-    }
-    els.auditLog.appendChild(row);
-  }
-}
-
-function renderEmptyAudit(message) {
-  els.auditLog.replaceChildren(createEmptyState(message));
-}
-
 // ---------------------------------------------------------------------------
 // Normalizers
 // ---------------------------------------------------------------------------
@@ -1276,7 +1402,11 @@ function handleSendDtmf() {
   const sequence = els.dtmfInput.value.trim();
   runImmediateOperation({
     busyText: `Sending DTMF ${sequence}…`,
-    action: async () => { await sendDtmf(sequence, { confirmed: true }); els.dtmfInput.value = ""; },
+    action: async () => {
+      await sendDtmf(sequence, { confirmed: true });
+      pushTape({ kind: "dtmf", text: `${sequence} sent` });
+      els.dtmfInput.value = "";
+    },
     successMessage: `DTMF sequence ${sequence} sent.`
   });
 }
@@ -1304,7 +1434,6 @@ async function runImmediateOperation({ busyText, action, successMessage }) {
   setBusy(true, busyText);
   try {
     await action();
-    await refreshAudit({ manual: false, force: true, silent: true });
     setFooter(successMessage, "success", 3000);
   } catch (error) {
     console.error(error);
@@ -1319,7 +1448,7 @@ async function handleCop(command) {
   const labels  = { identify: "Identify", time: "Time", status: "Status", version: "Version" };
   runImmediateOperation({
     busyText: `Sending COP ${labels[command]}…`,
-    action: () => actions[command](),
+    action: async () => { await actions[command](); pushTape({ kind: "cop", text: `${labels[command]} sent` }); },
     successMessage: `COP ${labels[command]} sent.`
   });
 }

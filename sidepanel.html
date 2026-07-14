@@ -98,6 +98,20 @@
       <span id="busyText">Working…</span>
     </div>
 
+    <!-- ═══════════════ ZONE 2: THE TRAFFIC TAPE (the only scrolling region) ═══════════════ -->
+    <section class="tape-zone" aria-labelledby="tapeLabel">
+      <div class="tape-head">
+        <span class="tape-label" id="tapeLabel">Traffic</span>
+        <div class="tape-filters" role="group" aria-label="Filter traffic">
+          <button class="tf" type="button" data-filter="all" aria-pressed="true">All</button>
+          <button class="tf" type="button" data-filter="keyups" aria-pressed="false">Keyups</button>
+          <button class="tf" type="button" data-filter="links" aria-pressed="false">Links</button>
+          <button class="tf" type="button" data-filter="cmds" aria-pressed="false">Cmds</button>
+        </div>
+      </div>
+      <div class="tape" id="tape"></div>
+    </section>
+
     <!-- Old body sections below are being migrated zone by zone; each stays
          fully wired until its replacement zone lands, so the panel is always
          loadable and functional mid-rebuild. -->
@@ -186,19 +200,6 @@
       <p class="hint">
         DTMF requests are sent with <code>confirmed: true</code>.
       </p>
-      </div>
-    </section>
-
-    <section class="panel-section audit-section" aria-labelledby="toggle-audit">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-audit" aria-expanded="true" aria-controls="audit-body">Audit Log <span class="toggle-icon">▾</span></button>
-        <button id="refreshAudit" class="small secondary" type="button">Refresh</button>
-      </div>
-      <div class="section-body" id="audit-body">
-
-      <div id="auditLog" class="audit-log">
-        <div class="empty-state">No audit entries loaded yet.</div>
-      </div>
       </div>
     </section>
 
