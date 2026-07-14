@@ -1100,3 +1100,71 @@ code { color: var(--accent); font-family: var(--font-mono); }
   gap: 6px;
   align-items: center;
 }
+
+/* ── Connected To bar ────────────────────────────────────────────────── */
+.connected-to-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  padding: 4px 8px;
+  background: var(--panel-inset);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+.connected-to-label {
+  color: var(--faint);
+  font-family: var(--font-head);
+  font-size: 0.58rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.connected-to-node {
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+}
+
+.connected-to-callsign {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Active TX card callsign ─────────────────────────────────────────────── */
+.active-node-callsign {
+  display: block;
+  font-size: 0.60rem;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Transmitting node highlight ─────────────────────────────────────────── */
+.connected-node-item {
+  position: relative;
+}
+
+.connected-node-item.transmitting {
+  border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 10%, var(--panel-inset));
+}
+
+.connected-node-item.transmitting .node-number {
+  color: var(--amber);
+}
+
+.connected-node-item.transmitting .node-callsign {
+  color: var(--amber-dim);
+}

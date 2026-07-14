@@ -50,18 +50,25 @@
           <span class="summary-label" id="lbl-connected">Connected Nodes</span>
           <strong id="statusConnectedCount" aria-labelledby="lbl-connected">—</strong>
         </div>
-      <div class="summary-card">
-          <span class="summary-label" id="lbl-uptime">Uptime</span>
-          <strong id="statusUptime" aria-labelledby="lbl-uptime">—</strong>
+      <div class="summary-card active-node-card">
+          <span class="summary-label" id="lbl-active-node">Active TX</span>
+          <strong id="activeNodeNumber" aria-labelledby="lbl-active-node">—</strong>
+          <span id="activeNodeCallsign" class="active-node-callsign" hidden></span>
         </div>
         <div class="summary-card keyed-card">
           <span id="statusRxKeyed" class="keyed-badge rx"></span>
           <span id="statusTxKeyed" class="keyed-badge tx"></span>
         </div>
       </section>
+      <div class="connected-to-bar">
+        <span class="connected-to-label">Connected To</span>
+        <span id="connectedToNode" class="connected-to-node">—</span>
+        <span id="connectedToCallsign" class="connected-to-callsign" hidden></span>
+      </div>
       <div class="node-stats-row">
         <div class="stat-pill"><span class="stat-label">TX Today</span><span id="statusTxToday">—</span></div>
         <div class="stat-pill"><span class="stat-label">TX Total</span><span id="statusTxTotal">—</span></div>
+        <div class="stat-pill"><span class="stat-label">Uptime</span><span id="statusUptime">—</span></div>
         <div id="nodeCountWarningBadge" class="node-count-warning" hidden>⚠ HIGH CONN</div>
       </div>
     </header>

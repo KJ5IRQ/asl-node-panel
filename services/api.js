@@ -290,6 +290,27 @@ export function normalizeMacroNumber(value) {
   return macroNumber;
 }
 
+/**
+ * Parse RPT_ALINKS into a Set of node numbers currently passing audio (K flag).
+ * Format: "count,{node}{flags}[,...]"  e.g. "1,674982TK"
+ */
+export function parseActiveLinks(alinksStr) {
+  const active = new Set();
+  if (!alinksStr) return active;
+  const raw = String(alinksStr).trim();
+  if (!raw || raw === "0") return active;
+  const parts = raw.split(",");
+  for (let i = 1; i < parts.length; i++) {
+    let entry = String(parts[i] || "").trim().toUpperCase();
+    if (!entry) continue;
+    entry = entry.replace(/^[TRM]/, "");
+    const match = entry.match(/^(\d+)([A-Z]*)$/);
+    if (!match) continue;
+    if (match[2].includes("K")) active.add(match[1]);
+  }
+  return active;
+}
+
 export function normalizeAuditLines(value) {
   const lines = Number(value);
   if (!Number.isInteger(lines) || lines < 1) throw new Error("Audit line count must be a positive integer.");

@@ -16,6 +16,7 @@ import {
   copStatus,
   copVersion,
   createEventStreamFromSettings,
+  parseActiveLinks,
 } from "./services/api.js";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 15000;
@@ -40,6 +41,10 @@ const state = {
   // SSE state
   eventStream: null,
   sseConnected: false,
+  // Active transmitting links
+  activeLinks: new Set(),
+  // Node we connected to via the extension this session
+  connectedTo: null, // { node, callsign }
 };
 
 const els = {};
@@ -106,7 +111,9 @@ async function startEventStream() {
     stream.on("node.variables.snapshot", (data) => {
       if (data.variables) {
         state.variables = data.variables;
+        state.activeLinks = parseActiveLinks(state.variables?.active_links);
         renderKeyedIndicators();
+        renderConnectedNodes(state.connectedNodes);
       }
     });
 
@@ -197,6 +204,10 @@ function bindElements() {
   els.statusUptime = requireElement("statusUptime");
   els.statusTxToday = requireElement("statusTxToday");
   els.statusTxTotal = requireElement("statusTxTotal");
+  els.activeNodeNumber = requireElement("activeNodeNumber");
+  els.activeNodeCallsign = requireElement("activeNodeCallsign");
+  els.connectedToNode = requireElement("connectedToNode");
+  els.connectedToCallsign = requireElement("connectedToCallsign");
   els.nodeCountWarningBadge = requireElement("nodeCountWarningBadge");
   els.dtmfMacrosGrid = requireElement("dtmfMacrosGrid");
   els.scheduleIndicator = requireElement("scheduleIndicator");
@@ -315,6 +326,12 @@ function bindMessages() {
 async function loadInitialState() {
   try {
     await loadSettingsIntoState();
+    // Restore connected-to from sessionStorage
+    try {
+      const raw = sessionStorage.getItem("asl_connected_to");
+      if (raw) state.connectedTo = JSON.parse(raw);
+    } catch { /* non-critical */ }
+    renderConnectedTo();
     renderFavorites();
     updateControlAvailability();
 
@@ -403,6 +420,15 @@ async function refreshAll(options = {}) {
     const normalizedNodes = normalizeNodesResponse(nodesResult.value);
     state.connectedNodes = normalizedNodes.connectedNodes;
     state.connectedCount = normalizedNodes.count;
+    // Validate connectedTo is still in the list; clear if it dropped
+    if (state.connectedTo) {
+      const still = state.connectedNodes.some((n) => n.node === state.connectedTo.node);
+      if (!still) {
+        state.connectedTo = null;
+        sessionStorage.removeItem("asl_connected_to");
+        renderConnectedTo();
+      }
+    }
     renderConnectedNodes(state.connectedNodes);
   } else {
     hadError = true;
@@ -412,6 +438,7 @@ async function refreshAll(options = {}) {
 
   if (variablesResult.status === "fulfilled") {
     state.variables = variablesResult.value;
+    state.activeLinks = parseActiveLinks(state.variables?.active_links);
   } else {
     console.error(variablesResult.reason);
   }
@@ -510,7 +537,24 @@ function clearStatusHeader() {
   els.statusUptime.textContent = "—";
   els.statusTxToday.textContent = "—";
   els.statusTxTotal.textContent = "—";
+  els.activeNodeNumber.textContent = "—";
+  els.activeNodeCallsign.textContent = "";
+  els.activeNodeCallsign.hidden = true;
   els.nodeCountWarningBadge.hidden = true;
+}
+
+function renderActiveNode() {
+  const activeNode = state.connectedNodes.find((n) => state.activeLinks.has(n.node));
+  els.activeNodeNumber.textContent = activeNode?.node || "—";
+  els.activeNodeCallsign.textContent = activeNode?.callsign || "";
+  els.activeNodeCallsign.hidden = !activeNode?.callsign;
+}
+
+function renderConnectedTo() {
+  const ct = state.connectedTo;
+  els.connectedToNode.textContent = ct?.node || "—";
+  els.connectedToCallsign.textContent = ct?.callsign || "";
+  els.connectedToCallsign.hidden = !ct?.callsign;
 }
 
 function renderFavorites() {
@@ -596,9 +640,15 @@ function renderConnectedNodes(nodes) {
     info.textContent = connectedNode.info || getModeLabel(connectedNode.mode);
     info.title = connectedNode.info || getModeLabel(connectedNode.mode);
 
+    if (state.activeLinks.has(connectedNode.node)) {
+      item.classList.add("transmitting");
+    }
+
     item.append(nodeWrap, mode, info);
     els.connectedNodesList.appendChild(item);
   }
+
+  renderActiveNode();
 }
 
 function renderEmptyConnectedNodes(message) {
@@ -714,7 +764,20 @@ function handleConnectFromInput(monitorOnly) {
   const node = els.connectNodeInput.value.trim();
   runTimedOperation({
     busyText: monitorOnly ? `Connecting to ${node} in monitor-only mode…` : `Connecting to ${node} in transceive mode…`,
-    action: async () => { await connectNode(node, { monitorOnly }); els.connectNodeInput.value = ""; },
+    action: async () => {
+      await connectNode(node, { monitorOnly });
+      // Resolve callsign from lookup result or API
+      let callsign = "";
+      if (!els.nodeLookupResult.hidden && els.nodeLookupResult.textContent) {
+        callsign = els.nodeLookupResult.textContent.split("—")[0].trim();
+      } else {
+        try { const r = await lookupNode(node); callsign = r?.callsign || ""; } catch { /* silent */ }
+      }
+      state.connectedTo = { node, callsign };
+      try { sessionStorage.setItem("asl_connected_to", JSON.stringify(state.connectedTo)); } catch { /* non-critical */ }
+      renderConnectedTo();
+      els.connectNodeInput.value = "";
+    },
     successMessage: monitorOnly ? `Monitor-only connect request sent for node ${node}.` : `Transceive connect request sent for node ${node}.`
   });
 }
@@ -726,7 +789,14 @@ function handleFavoritesClick(event) {
   const monitorOnly = button.dataset.favoriteMode === "monitor";
   runTimedOperation({
     busyText: monitorOnly ? `Connecting favorite ${node} in monitor-only mode…` : `Connecting favorite ${node} in transceive mode…`,
-    action: () => connectNode(node, { monitorOnly }),
+    action: async () => {
+      await connectNode(node, { monitorOnly });
+      let callsign = "";
+      try { const r = await lookupNode(node); callsign = r?.callsign || ""; } catch { /* silent */ }
+      state.connectedTo = { node, callsign };
+      try { sessionStorage.setItem("asl_connected_to", JSON.stringify(state.connectedTo)); } catch { /* non-critical */ }
+      renderConnectedTo();
+    },
     successMessage: monitorOnly ? `Monitor-only connect request sent for favorite ${node}.` : `Transceive connect request sent for favorite ${node}.`
   });
 }
@@ -736,7 +806,12 @@ function handleDisconnectAll() {
   if (!confirmed) return;
   runTimedOperation({
     busyText: "Disconnecting all nodes…",
-    action: () => disconnectAll(),
+    action: async () => {
+      await disconnectAll();
+      state.connectedTo = null;
+      sessionStorage.removeItem("asl_connected_to");
+      renderConnectedTo();
+    },
     successMessage: "Disconnect-all request sent.",
     postDelayMs: 3000
   });
@@ -947,7 +1022,10 @@ function renderDtmfMacros() {
 // ---------------------------------------------------------------------------
 
 const ASL_STATS_BASE = "https://stats.allstarlink.org/api";
+const FAVORITES_STATS_INTERVAL_MS = 60000; // poll external API at most once per minute
 let favoritesStatusCache = {};
+let favoritesStatsTimer = null;
+let favoritesStatsLastRun = 0;
 
 async function fetchFavoriteStats(nodeNumber) {
   try {
@@ -959,13 +1037,15 @@ async function fetchFavoriteStats(nodeNumber) {
 
 async function refreshFavoritesStatus() {
   if (!state.favorites.length) return;
-  const results = await Promise.allSettled(state.favorites.map((f) => fetchFavoriteStats(f.node)));
-  results.forEach((result, i) => {
-    const node = state.favorites[i]?.node;
-    if (node && result.status === "fulfilled" && result.value) {
-      favoritesStatusCache[node] = result.value;
-    }
-  });
+  const now = Date.now();
+  if (now - favoritesStatsLastRun < FAVORITES_STATS_INTERVAL_MS) return;
+  favoritesStatsLastRun = now;
+  // Fetch sequentially with a small gap to avoid burst rate limiting
+  for (const f of state.favorites) {
+    const result = await fetchFavoriteStats(f.node);
+    if (result) favoritesStatusCache[f.node] = result;
+    await new Promise((r) => setTimeout(r, 500));
+  }
   renderFavoritesStatus();
 }
 
