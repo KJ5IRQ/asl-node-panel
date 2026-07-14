@@ -49,6 +49,20 @@ export function storageSet(values) {
   });
 }
 
+export function storageRemove(keys) {
+  return new Promise((resolve, reject) => {
+    if (!hasChromeStorageApi()) {
+      reject(new Error("chrome.storage.sync is not available."));
+      return;
+    }
+    chrome.storage.sync.remove(keys, () => {
+      const error = chrome.runtime.lastError;
+      if (error) { reject(new Error(error.message)); return; }
+      resolve();
+    });
+  });
+}
+
 export function isConfigured(settings) {
   return Boolean(settings?.baseUrl && settings?.apiKey);
 }
@@ -96,6 +110,52 @@ export function normalizeNodeNumber(value) {
   const node = String(value || "").trim();
   if (!/^\d{1,7}$/.test(node)) throw new Error("Node number must be 1-7 digits.");
   return node;
+}
+
+// Non-throwing companion to normalizeNodeNumber, for form validation.
+export function isValidNodeNumber(value) {
+  return /^\d{1,7}$/.test(String(value || "").trim());
+}
+
+export function sanitizeFavorites(favorites) {
+  if (!Array.isArray(favorites)) return [];
+  const seen = new Set();
+  const sanitized = [];
+  for (const favorite of favorites) {
+    const node = String(favorite?.node || "").trim();
+    const label = String(favorite?.label || "").trim();
+    if (!isValidNodeNumber(node) || seen.has(node)) continue;
+    seen.add(node);
+    sanitized.push({ node, label: label || node });
+  }
+  return sanitized.sort((a, b) => Number(a.node) - Number(b.node));
+}
+
+// Strict base URL validator for the options-page save path. Throws on
+// anything that is not a well-formed http(s) URL; strips hash/search/
+// trailing slashes. See normalizeBaseUrl() above for the loose read path.
+export function validateBaseUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) throw new Error("Base URL is required.");
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("Base URL must be a valid http:// or https:// URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Base URL must start with http:// or https://.");
+  }
+  url.hash = "";
+  url.search = "";
+  const pathname = url.pathname.replace(/\/+$/, "");
+  const normalizedPath = pathname === "/" ? "" : pathname;
+  return `${url.protocol}//${url.host}${normalizedPath}`;
+}
+
+export function getOriginPattern(baseUrl) {
+  const url = new URL(baseUrl);
+  return `${url.protocol}//${url.host}/*`;
 }
 
 // ---------------------------------------------------------------------------

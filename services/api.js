@@ -317,7 +317,7 @@ export function normalizeAuditLines(value) {
   return Math.min(lines, 500);
 }
 
-function buildUrl(baseUrl, path) {
+export function buildUrl(baseUrl, path) {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
   const normalizedPath = String(path || "").startsWith("/") ? path : `/${path}`;
   return `${normalizedBaseUrl}${normalizedPath}`;
