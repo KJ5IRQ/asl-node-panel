@@ -11,7 +11,7 @@ import {
 import { normalizeDtmfSequence, AslAgentClient } from "./services/api.js";
 import { applyTheme } from "./services/theme.js";
 
-const STORAGE_KEYS = ["baseUrl", "apiKey", "favorites", "refreshInterval", "collapsedSections", "dtmfMacros", "schedules", "nodeCountWarning", "themeSettings", "screenReaderMode"];
+const STORAGE_KEYS = ["baseUrl", "apiKey", "favorites", "refreshInterval", "collapsedSections", "dtmfMacros", "schedules", "nodeCountWarning", "themeSettings", "screenReaderMode", "totSeconds", "totBeep", "keyupBeep", "disconnectFirst"];
 
 const DEFAULT_SETTINGS = {
   baseUrl: "",
@@ -23,8 +23,14 @@ const DEFAULT_SETTINGS = {
   schedules: [],
   nodeCountWarning: 0,
   themeSettings: null,
-  screenReaderMode: false
+  screenReaderMode: false,
+  totSeconds: 180,
+  totBeep: false,
+  keyupBeep: false,
+  disconnectFirst: false
 };
+
+const TOT_SECONDS_OPTIONS = [0, 120, 150, 180];
 
 const state = {
   favorites: [],
@@ -59,6 +65,9 @@ function bindElements() {
 
   els.refreshInterval = document.getElementById("refreshInterval");
   els.nodeCountWarning = document.getElementById("nodeCountWarning");
+  els.totSeconds = document.getElementById("totSeconds");
+  els.totBeep = document.getElementById("totBeep");
+  els.keyupBeep = document.getElementById("keyupBeep");
   els.macroLabel = document.getElementById("macroLabel");
   els.macroSequence = document.getElementById("macroSequence");
   els.addMacro = document.getElementById("addMacro");
@@ -119,6 +128,18 @@ async function loadSettings() {
     if (els.nodeCountWarning) {
       els.nodeCountWarning.value = String(settings.nodeCountWarning || 0);
     }
+    if (els.totSeconds) {
+      const tot = TOT_SECONDS_OPTIONS.includes(Number(settings.totSeconds)) ? Number(settings.totSeconds) : 180;
+      els.totSeconds.value = String(tot);
+    }
+    if (els.totBeep) {
+      els.totBeep.checked = Boolean(settings.totBeep);
+      els.totBeep.setAttribute("aria-checked", String(Boolean(settings.totBeep)));
+    }
+    if (els.keyupBeep) {
+      els.keyupBeep.checked = Boolean(settings.keyupBeep);
+      els.keyupBeep.setAttribute("aria-checked", String(Boolean(settings.keyupBeep)));
+    }
     state.dtmfMacros = Array.isArray(settings.dtmfMacros) ? settings.dtmfMacros : [];
     state.schedules = Array.isArray(settings.schedules) ? settings.schedules : [];
     state.themeSettings = settings.themeSettings || { preset: "system", mode: "dark", customColors: {} };
@@ -164,7 +185,10 @@ async function handleSaveSettings() {
       schedules: validated.schedules,
       nodeCountWarning: validated.nodeCountWarning,
       themeSettings: validated.themeSettings,
-      screenReaderMode: validated.screenReaderMode
+      screenReaderMode: validated.screenReaderMode,
+      totSeconds: validated.totSeconds,
+      totBeep: validated.totBeep,
+      keyupBeep: validated.keyupBeep
     });
 
     setStatus("Settings saved.", "success", 2000);
@@ -343,7 +367,10 @@ function validateSettings() {
     schedules: state.schedules,
     nodeCountWarning: Math.max(0, Number(els.nodeCountWarning?.value) || 0),
     themeSettings: state.themeSettings,
-    screenReaderMode: Boolean(els.screenReaderMode?.checked)
+    screenReaderMode: Boolean(els.screenReaderMode?.checked),
+    totSeconds: TOT_SECONDS_OPTIONS.includes(Number(els.totSeconds?.value)) ? Number(els.totSeconds.value) : 180,
+    totBeep: Boolean(els.totBeep?.checked),
+    keyupBeep: Boolean(els.keyupBeep?.checked)
   };
 }
 

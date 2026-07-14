@@ -4,6 +4,57 @@ All notable changes to ASL Node Panel are documented here. Each release also
 lists its known limitations; that is now standard practice for every entry,
 not just this one.
 
+## v0.9.0 "Faceplate"
+
+A ground-up redesign of the side panel from a stack of scrolling sections into
+a radio front panel: a fixed display up top, one scrolling traffic tape in the
+middle, and a dock of controls at the bottom. The services layer from v0.8
+(REST client, SSE, storage, service-worker schedules) is unchanged; this is a
+new presentation layer plus the timeout timer.
+
+### Added
+- **Automatic timeout timer (TOT).** When you key up (your node's receiver
+  hears you, i.e. your audio is going out to the network), the panel arms a
+  countdown ring and re-arms it on every re-key, with no interaction. Amber
+  above one minute, warning under a minute, critical under thirty seconds, and
+  a TIME-OUT alarm plus a tape entry at zero. Duration is configurable
+  (3:00 / 2:30 / 2:00 / off) with optional warning beeps, off by default.
+- **Direction-correct on-air readout.** The display distinguishes OUTBOUND
+  (you talking out, `rxkeyed`) from INBOUND (a remote station, `txkeyed`),
+  because "whose transmitter?" is exactly the ambiguity that trips people up.
+  Inbound shows the talker's callsign and a count-up timer; the raw app_rpt
+  node state stays in a tooltip.
+- **Traffic tape.** One chronological event stream replacing the old Connected
+  Nodes list and Audit Log: remote keyups with hold times, your own outbound
+  transmissions with their TOT outcome, link connects and drops, DTMF, COP, and
+  schedule fires, with All / Keyups / Links / Cmds filters. Seeded from
+  `/audit` for pre-open history and persisted to session storage so a panel
+  reload mid-net keeps the log.
+- **Standby shack clock.** When the node is idle the display shows a ticking
+  UTC clock, the node ident, and the next scheduled event.
+- **Connected nodes as link chips** in the display, lit when that station
+  keys; per-node disconnect lives in a chip popover.
+- **The Dock.** Connect, Keypad, Memories, and COP each open a drawer. The
+  keypad is the full 16-key DTMF layout with your macros as one-tap chips.
+  Memories (favorites) show a busy meter and link count from the stats API and
+  a status lamp. Connect has an AllScan-style "disconnect current links first"
+  option.
+- **Instrument theme**, a radio-faceplate skin (amber phosphor on a near-black
+  olive bezel), selectable alongside the existing six presets.
+
+### Known limitations
+- The dock sits in normal flow below the tape rather than being rigidly pinned
+  to the viewport bottom; the display (the critical readout) is sticky-pinned
+  at the top. A fully fixed three-pane layout is a later refinement.
+- The tape re-renders on each event (preserving scroll position) rather than
+  reconciling rows individually; fine for the 200-row cap.
+- The TOT triggers on the node's `rxkeyed` transition as reported by the
+  backend; if the panel is opened mid-keyup the arm time is unknown and the
+  ring shows `--:--` until the next keyup rather than guessing.
+- Requires manual QA in Chrome (load unpacked) before release: this build was
+  assembled and unit-tested but not yet exercised against a live node in the
+  browser.
+
 ## v0.8.0
 
 Correctness and accessibility audit pass, plus several UX additions. This

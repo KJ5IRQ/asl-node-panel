@@ -15,6 +15,7 @@ export const THEME_VARS = [
 
 export const THEMES = {
   system:       { label: "System Default" },
+  instrument:   { label: "Instrument" },
   sigcorps:     { label: "Signal Corps" },
   navy:         { label: "Dark Navy" },
   slate:        { label: "Slate" },

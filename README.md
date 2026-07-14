@@ -2,7 +2,7 @@
 
 A Chrome side panel extension for monitoring and controlling your AllStarLink node via [ASL3-API](https://github.com/KJ5IRQ/asl3-api). Connects to a FastAPI-based REST middleware running on your ASL3 Raspberry Pi.
 
-**Current version:** v0.8.0  
+**Current version:** v0.9.0 "Faceplate"  
 **Backend required:** ASL3-API v1.4.0+ running on your Pi
 
 ---
@@ -133,10 +133,10 @@ A Chrome side panel extension for monitoring and controlling your AllStarLink no
 
 ```
 asl-node-panel/
-  manifest.json           Extension manifest (v3), v0.8.0
+  manifest.json           Extension manifest (v3), v0.9.0
   background.js           Service worker (module): side panel registration,
                            schedule execution via chrome.alarms
-  sidepanel.html          Panel UI
+  sidepanel.html          Panel UI (Faceplate: display / tape / dock zones)
   sidepanel.js            Panel logic, state, accessibility engine
   sidepanel.css           Panel-specific styles (layout, components)
   themes.css              Shared theme palettes, [data-a11y] rules, and
@@ -153,10 +153,16 @@ asl-node-panel/
                            validators shared by the panel and settings page
     theme.js              Theme engine (applyTheme, load/watch helpers)
     theme-init.js         Theme initializer for options page (CSP-safe)
+    tape.js               Traffic tape data model (pure, testable)
+    tot.js                Timeout timer state + duration formatters (pure)
+    activity.js           Keyed-set diffing, busy%, next-schedule (pure)
   tests/
     api.test.mjs          Validators and parsers in services/api.js
     storage.test.mjs      Validators and normalizers in services/storage.js
     contrast.test.mjs     WCAG AA contrast floor, parsed live from themes.css
+    tape.test.mjs         Tape push/finalize/filter/persist round-trips
+    tot.test.mjs          Timeout timer phase boundaries and re-arm
+    activity.test.mjs     Keyed-set diff, busy%, next-schedule computation
 ```
 
 ---
@@ -202,6 +208,7 @@ asl-node-panel/
 | v0.7.0 | Wire SSE stream, live RX/TX keyed badges, structured audit entries |
 | v0.7.1 | Fix RX/TX badge always-visible behavior and label mapping |
 | v0.8.0 | Correctness/a11y audit pass: fixed schedule disconnect, favorites live status, shared themes.css, WCAG AA contrast, options page theming; Test Connection, per-node disconnect, actionable errors, gated SSE with polling fallback, bundled fonts; schedules moved to the background service worker. See CHANGELOG.md. |
+| v0.9.0 | "Faceplate" redesign: fixed display + traffic tape + control dock. Automatic 3-minute timeout timer (TOT) with re-key reset; direction-correct outbound/inbound readout; unified traffic tape (keyups, links, commands) seeded from /audit; standby UTC shack clock; connected nodes as link chips; DTMF keypad; memories with busy meters; Instrument theme. See CHANGELOG.md. |
 
 ---
 

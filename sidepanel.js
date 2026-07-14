@@ -2,6 +2,9 @@
 
 import { getSettings, isConfigured, storageSet, normalizeSchedules } from "./services/storage.js";
 import { loadAndApplyTheme, applyTheme, watchThemeChanges } from "./services/theme.js";
+import { totState, formatCountdown, formatHold } from "./services/tot.js";
+import { computeNextSchedule, formatNextScheduleLine, diffKeyedSets, computeBusyPercent } from "./services/activity.js";
+import { createTape } from "./services/tape.js";
 import {
   getStatus,
   getConnectedNodes,
@@ -25,6 +28,7 @@ const DEFAULT_REFRESH_INTERVAL_MS = 15000;
 const SLOW_POLL_INTERVAL_MS = 30000; // fallback poll when SSE is live
 const AUDIT_LINES = 50;
 const MAX_SSE_ERRORS = 5; // consecutive errors before giving up on SSE for this session
+const TOT_TICK_MS = 250;
 
 const state = {
   settings: null,
@@ -46,8 +50,35 @@ const state = {
   sseConnected: false,
   // Active transmitting links
   activeLinks: new Set(),
-  // Node we connected to via the extension this session
-  connectedTo: null, // { node, callsign }
+  // ── Display zone (v0.9) ──
+  // Keyed edges are only meaningful after the first variables load; before
+  // that, a true rxkeyed/txkeyed means "already keyed when the panel opened"
+  // and must NOT arm timers (timer honesty: never guess an arm time).
+  onAirInit: false,
+  keyedRx: false,
+  keyedTx: false,
+  displayState: null,        // "standby" | "inbound" | "outbound" | "tot"
+  inboundSince: null,        // epoch ms of observed inbound keyup, or null (unknown)
+  tot: {
+    armedAtMs: null,         // null while indeterminate (opened mid-keyup)
+    timer: null,
+    expired: false,
+    lastRemain: null,        // for beep threshold-crossing detection
+    warnBeeped: false,
+  },
+  clockTimer: null,
+  inboundTimer: null,
+  openPopover: null,         // { el, node }
+  // ── Traffic tape (Zone 2) ──
+  tape: createTape(200),
+  tapeFilter: "all",
+  tapeInit: false,           // adopt the first keyed set without emitting history
+  prevActiveLinks: new Set(),
+  remoteKeyedSince: {},       // node -> epoch ms, for keyup hold times
+  tapeSeeded: false,          // /audit seeded into the tape exactly once
+  tapeSaveTimer: null,
+  // ── Dock (Zone 3) ──
+  openDrawer: null,           // drawer element id, or null
 };
 
 const els = {};
@@ -62,10 +93,12 @@ async function init() {
   bindEvents();
   bindMessages();
 
+  await hydrateTape();
+  renderTape();
   await loadInitialState();
   applyCollapsedSections();
   renderDtmfMacros();
-  renderScheduleIndicator();
+  renderDisplay();
   startAutoRefresh();
   startEventStream();
 }
@@ -87,10 +120,12 @@ async function startEventStream() {
     const version = await getVersion();
     if (version && version.events_enabled === false) {
       setConnectionStatus("Polling (live events disabled on backend)");
+      setLiveLamp("polling", "Polling");
       return;
     }
   } catch (error) {
     setConnectionStatus("Polling (backend unreachable)");
+    setLiveLamp("offline", "Offline");
     if (isAuthError(error)) setFooter(error.message, "error", 0, { settingsLink: true });
     return;
   }
@@ -103,6 +138,7 @@ async function startEventStream() {
       sseErrorCount = 0;
       state.sseConnected = true;
       setConnectionStatus(`Live ● ${hostOnly(state.settings.baseUrl)}`);
+      setLiveLamp("live", "Live");
       // Switch to slow fallback poll -- SSE handles live state
       stopAutoRefresh();
       startSlowPoll();
@@ -115,11 +151,13 @@ async function startEventStream() {
         // Give up on SSE for this session rather than reconnect forever.
         stopEventStream();
         setConnectionStatus("Live events unavailable, polling");
+        setLiveLamp("polling", "Polling");
         stopSlowPoll();
         startAutoRefresh();
         return;
       }
       setConnectionStatus(`Reconnecting… ${hostOnly(state.settings.baseUrl)}`);
+      setLiveLamp("polling", "Polling");
       // Fall back to normal refresh rate while SSE is down
       stopSlowPoll();
       startAutoRefresh();
@@ -128,31 +166,33 @@ async function startEventStream() {
     stream.on("node.rxkeyed", (data) => {
       if (!state.variables) state.variables = {};
       state.variables.rxkeyed = Boolean(data.rxkeyed);
-      renderKeyedIndicators();
+      updateOnAirState();
     });
 
     stream.on("node.txkeyed", (data) => {
       if (!state.variables) state.variables = {};
       state.variables.txkeyed = Boolean(data.txkeyed);
-      renderKeyedIndicators();
+      updateOnAirState();
     });
 
     stream.on("node.variables.snapshot", (data) => {
       if (data.variables) {
         state.variables = data.variables;
-        state.activeLinks = parseActiveLinks(state.variables?.active_links);
-        renderKeyedIndicators();
-        renderConnectedNodes(state.connectedNodes);
+        syncActiveLinks(parseActiveLinks(state.variables?.active_links));
+        updateOnAirState();
+        renderLinkBar();
       }
     });
 
-    stream.on("link.connected", () => {
-      // Refresh node list when a link connects
+    stream.on("link.connected", (data) => {
+      const node = data?.node ? String(data.node) : "";
+      pushTape({ kind: "link", node, text: `${node || "Node"} connected` });
       refreshNodesAndStatus({ silent: true });
     });
 
-    stream.on("link.disconnected", () => {
-      // Refresh node list when a link disconnects
+    stream.on("link.disconnected", (data) => {
+      const node = data?.node ? String(data.node) : "";
+      pushTape({ kind: "drop", node, text: `${node || "Node"} disconnected` });
       refreshNodesAndStatus({ silent: true });
     });
 
@@ -205,9 +245,9 @@ async function refreshNodesAndStatus({ silent = false } = {}) {
       const normalized = normalizeNodesResponse(nodesResult.value);
       state.connectedNodes = normalized.connectedNodes;
       state.connectedCount = normalized.count;
-      renderConnectedNodes(state.connectedNodes);
+      renderLinkBar();
     }
-    renderStatusHeader();
+    renderBezelAndStats();
     refreshFavoritesStatus();
     updateControlAvailability();
   } catch (e) {
@@ -222,27 +262,53 @@ async function refreshNodesAndStatus({ silent = false } = {}) {
 function bindElements() {
   els.connectionStatus = requireElement("connectionStatus");
   els.openSettings = requireElement("openSettings");
+  els.toggleMode = requireElement("toggleMode");
 
-  els.statusNode = requireElement("statusNode");
-  els.statusCallsign = requireElement("statusCallsign");
-  els.statusKeyups = requireElement("statusKeyups");
-  els.statusConnectedCount = requireElement("statusConnectedCount");
-  els.statusRxKeyed = requireElement("statusRxKeyed");
-  els.statusTxKeyed = requireElement("statusTxKeyed");
-  els.nodeLookupResult = requireElement("nodeLookupResult");
-  els.statusUptime = requireElement("statusUptime");
-  els.statusTxToday = requireElement("statusTxToday");
-  els.statusTxTotal = requireElement("statusTxTotal");
-  els.activeNodeNumber = requireElement("activeNodeNumber");
-  els.activeNodeCallsign = requireElement("activeNodeCallsign");
-  els.connectedToNode = requireElement("connectedToNode");
-  els.connectedToCallsign = requireElement("connectedToCallsign");
+  // Bezel
+  els.bezelNode = requireElement("bezelNode");
+  els.bezelCallsign = requireElement("bezelCallsign");
+  els.liveLamp = requireElement("liveLamp");
+  els.liveLampText = requireElement("liveLampText");
+
+  // Glass display
+  els.glass = requireElement("glass");
+  els.glassLamp = requireElement("glassLamp");
+  els.glassWord = requireElement("glassWord");
+  els.glassMode = requireElement("glassMode");
+  els.glassClock = requireElement("glassClock");
+  els.clockTime = requireElement("clockTime");
+  els.clockWatch = requireElement("clockWatch");
+  els.glassInbound = requireElement("glassInbound");
+  els.inboundCall = requireElement("inboundCall");
+  els.inboundNode = requireElement("inboundNode");
+  els.inboundVia = requireElement("inboundVia");
+  els.inboundTimer = requireElement("inboundTimer");
+  els.glassOutbound = requireElement("glassOutbound");
+  els.outboundCall = requireElement("outboundCall");
+  els.outboundSub = requireElement("outboundSub");
+  els.outboundTotLabel = requireElement("outboundTotLabel");
+  els.totRing = requireElement("totRing");
+  els.totRingTime = requireElement("totRingTime");
+  els.duplexNote = requireElement("duplexNote");
+
+  // Link bar + micro stats
+  els.linkBar = requireElement("linkBar");
+  els.disconnectAll = requireElement("disconnectAll");
+  els.statLinks = requireElement("statLinks");
+  els.statKeyups = requireElement("statKeyups");
+  els.statTxDay = requireElement("statTxDay");
+  els.statUptime = requireElement("statUptime");
   els.nodeCountWarningBadge = requireElement("nodeCountWarningBadge");
+
+  // Traffic tape (Zone 2)
+  els.tape = requireElement("tape");
+  els.tapeFilters = document.querySelector(".tape-filters");
+
+  // Legacy sections (migrate in later zones)
+  els.nodeLookupResult = requireElement("nodeLookupResult");
   els.dtmfMacrosGrid = requireElement("dtmfMacrosGrid");
-  els.scheduleIndicator = requireElement("scheduleIndicator");
   els.srAnnouncer = requireElement("srAnnouncer");
   els.srAnnouncerAssertive = requireElement("srAnnouncerAssertive");
-  els.toggleMode = requireElement("toggleMode");
   els.copIdentify = requireElement("copIdentify");
   els.copTime = requireElement("copTime");
   els.copStatus = requireElement("copStatus");
@@ -256,24 +322,28 @@ function bindElements() {
   els.favoritesList = requireElement("favoritesList");
   els.refreshFavorites = requireElement("refreshFavorites");
 
-  els.refreshStatus = requireElement("refreshStatus");
-  els.disconnectAll = requireElement("disconnectAll");
   els.busyMessage = requireElement("busyMessage");
   els.busyText = requireElement("busyText");
-  els.connectedNodesList = requireElement("connectedNodesList");
 
   els.dtmfForm = requireElement("dtmfForm");
   els.dtmfInput = requireElement("dtmfInput");
   els.sendDtmf = requireElement("sendDtmf");
 
-  els.refreshAudit = requireElement("refreshAudit");
-  els.auditLog = requireElement("auditLog");
+  // Dock (Zone 3)
+  els.dock = document.querySelector(".dock");
+  els.kpGrid = requireElement("kpGrid");
+  els.disconnectFirst = requireElement("disconnectFirst");
+  els.memCount = requireElement("memCount");
 
   els.footerMessage = requireElement("footerMessage");
 }
 
 function bindEvents() {
   els.openSettings.addEventListener("click", handleOpenSettings);
+
+  // The live lamp doubles as the manual refresh / SSE retry control (the
+  // v0.8 Refresh button relocated here).
+  els.liveLamp.addEventListener("click", () => refreshAll({ manual: true }));
 
   els.connectForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -285,12 +355,11 @@ function bindEvents() {
   });
 
   els.refreshFavorites.addEventListener("click", handleRefreshFavorites);
-  els.refreshStatus.addEventListener("click", () => refreshAll({ manual: true }));
-  els.refreshAudit.addEventListener("click", () => refreshAudit({ manual: true }));
+  if (els.tapeFilters) els.tapeFilters.addEventListener("click", handleTapeFilter);
 
   els.favoritesList.addEventListener("click", handleFavoritesClick);
   els.disconnectAll.addEventListener("click", handleDisconnectAll);
-  els.connectedNodesList.addEventListener("click", handleConnectedNodesClick);
+  els.linkBar.addEventListener("click", handleLinkBarClick);
 
   els.dtmfForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -305,8 +374,26 @@ function bindEvents() {
   els.connectNodeInput.addEventListener("input", handleNodeLookupInput);
   els.toggleMode.addEventListener("click", handleToggleMode);
 
-  document.querySelectorAll(".section-toggle").forEach((btn) => {
-    btn.addEventListener("click", handleSectionToggle);
+  // Dock: each key toggles its drawer (one open at a time)
+  if (els.dock) els.dock.addEventListener("click", handleDockClick);
+  document.querySelectorAll("[data-drawer-close]").forEach((btn) => {
+    btn.addEventListener("click", () => closeDrawers({ restoreFocus: true }));
+  });
+  els.kpGrid.addEventListener("click", handleKeypadClick);
+  els.disconnectFirst.addEventListener("change", handleDisconnectFirstChange);
+
+  // Popover + drawer dismissal: Escape and outside-click
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (state.openPopover) { closePopover({ restoreFocus: true }); return; }
+    if (state.openDrawer) closeDrawers({ restoreFocus: true });
+  });
+  document.addEventListener("click", (event) => {
+    if (!state.openPopover) return;
+    const { el } = state.openPopover;
+    if (el.contains(event.target)) return;
+    if (event.target.closest(".chip")) return; // chip clicks manage their own popover
+    closePopover({ restoreFocus: false });
   });
 }
 
@@ -330,13 +417,14 @@ function bindMessages() {
         handleRefreshFavorites();
         loadSettingsIntoState().then(() => {
           renderDtmfMacros();
-          renderScheduleIndicator();
+          renderDisplay();
           applyAccessibilityMode();
         }).catch(console.error);
         return;
       }
       if (message?.type === "SCHEDULE_FIRED") {
         const label = describeScheduleAction(message.schedule);
+        pushTape({ kind: "sched", text: message.ok ? `${label} fired ok` : `${label} failed: ${message.error}` });
         if (message.ok) {
           setFooter(`Schedule: ${label} fired.`, "success", 4000);
         } else {
@@ -366,20 +454,14 @@ function bindMessages() {
 async function loadInitialState() {
   try {
     await loadSettingsIntoState();
-    // Restore connected-to from sessionStorage
-    try {
-      const raw = sessionStorage.getItem("asl_connected_to");
-      if (raw) state.connectedTo = JSON.parse(raw);
-    } catch { /* non-critical */ }
-    renderConnectedTo();
     renderFavorites();
     updateControlAvailability();
 
     if (!isReady()) {
-      clearStatusHeader();
-      renderEmptyConnectedNodes("Configure ASL Agent settings first.");
-      renderEmptyAudit("Configure ASL Agent settings first.");
+      clearBezelAndStats();
+      renderTape();
       setConnectionStatus("Not configured");
+      setLiveLamp("offline", "Offline");
       setFooter("Open settings to add your ASL Agent base URL and API key.", "warning", 0, { settingsLink: true });
       return;
     }
@@ -388,6 +470,7 @@ async function loadInitialState() {
   } catch (error) {
     console.error(error);
     setConnectionStatus("Error");
+    setLiveLamp("offline", "Offline");
     setFooter(error.message, "error", 0, { settingsLink: isAuthError(error) });
     updateControlAvailability();
   }
@@ -405,6 +488,7 @@ async function loadSettingsIntoState() {
   state.schedules = normalizeSchedules(Array.isArray(settings.schedules) ? settings.schedules : []);
   state.nodeCountWarning = Number(settings.nodeCountWarning) || 0;
   state.screenReaderMode = Boolean(settings.screenReaderMode);
+  if (els.disconnectFirst) els.disconnectFirst.checked = Boolean(settings.disconnectFirst);
   applyAccessibilityMode();
 }
 
@@ -430,10 +514,10 @@ async function refreshAll(options = {}) {
   if (state.busy && !force) return;
 
   if (!isReady()) {
-    clearStatusHeader();
-    renderEmptyConnectedNodes("Configure ASL Agent settings first.");
-    renderEmptyAudit("Configure ASL Agent settings first.");
+    clearBezelAndStats();
+    renderTape();
     setConnectionStatus("Not configured");
+    setLiveLamp("offline", "Offline");
     updateControlAvailability();
     return;
   }
@@ -469,52 +553,54 @@ async function refreshAll(options = {}) {
     const normalizedNodes = normalizeNodesResponse(nodesResult.value);
     state.connectedNodes = normalizedNodes.connectedNodes;
     state.connectedCount = normalizedNodes.count;
-    // Validate connectedTo is still in the list; clear if it dropped
-    if (state.connectedTo) {
-      const still = state.connectedNodes.some((n) => n.node === state.connectedTo.node);
-      if (!still) {
-        state.connectedTo = null;
-        sessionStorage.removeItem("asl_connected_to");
-        renderConnectedTo();
-      }
-    }
-    renderConnectedNodes(state.connectedNodes);
+    renderLinkBar();
   } else {
     hadError = true;
     if (isAuthError(nodesResult.reason)) authError = true;
     console.error(nodesResult.reason);
-    renderEmptyConnectedNodes(`Failed to load connected nodes: ${nodesResult.reason.message}`);
   }
 
   if (variablesResult.status === "fulfilled") {
     state.variables = variablesResult.value;
-    state.activeLinks = parseActiveLinks(state.variables?.active_links);
+    syncActiveLinks(parseActiveLinks(state.variables?.active_links));
+    updateOnAirState();
+    renderLinkBar();
   } else {
     if (isAuthError(variablesResult.reason)) authError = true;
     console.error(variablesResult.reason);
   }
 
+  // The tape is seeded from /audit once for pre-panel-open history; live
+  // events append on top after that. seedFromAudit de-dupes, so a missed
+  // first seed just fills in on the next successful poll.
   if (auditResult.status === "fulfilled") {
-    renderAudit(auditResult.value);
+    if (!state.tapeSeeded) {
+      state.tape.seedFromAudit(auditResult.value?.entries);
+      state.tapeSeeded = true;
+      renderTape();
+      scheduleTapeSave();
+    }
   } else {
     hadError = true;
     if (isAuthError(auditResult.reason)) authError = true;
     console.error(auditResult.reason);
-    renderEmptyAudit(`Failed to load audit log: ${auditResult.reason.message}`);
   }
 
-  renderStatusHeader();
+  renderBezelAndStats();
   refreshFavoritesStatus();
 
   if (hadError) {
     setConnectionStatus("Refresh error");
+    setLiveLamp("offline", "Offline");
     if (!silent) setFooter("One or more ASL Agent requests failed.", "error", 0, { settingsLink: authError });
   } else {
     // Show live indicator if SSE is connected, otherwise just the host
     if (state.sseConnected) {
       setConnectionStatus(`Live ● ${hostOnly(state.settings.baseUrl)}`);
+      setLiveLamp("live", "Live");
     } else {
       setConnectionStatus(`Connected to ${hostOnly(state.settings.baseUrl)}`);
+      setLiveLamp("polling", "Polling");
     }
     if (manual && !silent) setFooter("Status refreshed.", "success", 2000);
   }
@@ -522,39 +608,484 @@ async function refreshAll(options = {}) {
   updateControlAvailability();
 }
 
-async function refreshAudit(options = {}) {
-  const { manual = false, force = false, silent = false } = options;
 
-  if (state.busy && !force) return;
-  if (!isReady()) { renderEmptyAudit("Configure ASL Agent settings first."); return; }
+// ---------------------------------------------------------------------------
+// On-air state machine (Display zone)
+//
+// Direction semantics on the operator's OWN node (verified against app_rpt):
+//   rxkeyed = the node's receiver hears a local signal = the OPERATOR is
+//             talking OUT to the network  -> OUTBOUND (arms the TOT).
+//   txkeyed = the node's transmitter is keyed = remote audio coming IN
+//             -> INBOUND (talker resolved from the ALINKS keyed set).
+// If both are true (full duplex), OUTBOUND wins the main readout because the
+// TOT is safety-relevant; a small "+ inbound" note shows beside it.
+// ---------------------------------------------------------------------------
 
-  try {
-    const audit = await getAudit(AUDIT_LINES);
-    renderAudit(audit);
-    if (manual && !silent) setFooter("Audit log refreshed.", "success", 2000);
-  } catch (error) {
-    console.error(error);
-    renderEmptyAudit(`Failed to load audit log: ${error.message}`);
-    if (!silent) setFooter(error.message, "error", 0, { settingsLink: isAuthError(error) });
+function updateOnAirState() {
+  const rx = Boolean(state.variables?.rxkeyed);
+  const tx = Boolean(state.variables?.txkeyed);
+
+  if (!state.onAirInit) {
+    // First variables load: any already-true keyed state has an unknown
+    // start time. Show indeterminate timers; never guess.
+    state.onAirInit = true;
+    if (rx) armTot(null);
+    if (tx) state.inboundSince = null;
+    state.keyedRx = rx;
+    state.keyedTx = tx;
+    renderDisplay();
+    return;
+  }
+
+  if (rx && !state.keyedRx) { armTot(Date.now()); pushOutStart(); }  // keyup: (re-)arm + log
+  if (!rx && state.keyedRx) { finalizeOut(); disarmTot(); }          // unkey: log then clear
+  if (tx && !state.keyedTx) state.inboundSince = Date.now();
+  if (!tx && state.keyedTx) {
+    state.inboundSince = null;
+    if (state.settings?.keyupBeep) beep(660, 80);      // courtesy beep on remote unkey
+  }
+
+  state.keyedRx = rx;
+  state.keyedTx = tx;
+  renderDisplay();
+}
+
+function computeDisplayState() {
+  if (state.keyedRx) return state.tot.expired ? "tot" : "outbound";
+  if (state.keyedTx) return "inbound";
+  return "standby";
+}
+
+const DISPLAY_WORDS = {
+  standby:  ["Standby", "Monitoring"],
+  inbound:  ["On Air", "Inbound"],
+  outbound: ["On Air", "Outbound · You"],
+  tot:      ["Time-Out", "Outbound · You"],
+};
+
+function renderDisplay() {
+  const displayState = computeDisplayState();
+  const changed = displayState !== state.displayState;
+  state.displayState = displayState;
+
+  els.glass.dataset.state = displayState;
+  els.glassWord.textContent = DISPLAY_WORDS[displayState][0];
+  els.glassMode.textContent = DISPLAY_WORDS[displayState][1];
+
+  // Raw node-centric state for operators who think in app_rpt terms.
+  els.glass.title =
+    `node RX keyed: ${state.keyedRx ? "yes" : "no"} · node TX keyed: ${state.keyedTx ? "yes" : "no"}`;
+
+  els.glassClock.hidden = displayState !== "standby";
+  els.glassInbound.hidden = displayState !== "inbound";
+  els.glassOutbound.hidden = displayState !== "outbound" && displayState !== "tot";
+  els.duplexNote.hidden = !(state.keyedRx && state.keyedTx);
+
+  if (displayState === "standby") {
+    startClock();
+    renderWatchLine();
+  } else {
+    stopClock();
+  }
+
+  if (displayState === "inbound") {
+    renderInbound();
+    startInboundTimer();
+  } else {
+    stopInboundTimer();
+  }
+
+  if (displayState === "outbound" || displayState === "tot") {
+    renderOutbound();
+  }
+
+  if (changed) {
+    announceDisplayState(displayState);
   }
 }
 
+function announceDisplayState(displayState) {
+  if (displayState === "tot") {
+    announce("Transmit time-out reached. Unkey.", "assertive");
+    return;
+  }
+  if (displayState === "outbound") {
+    announce("On air: outbound. Timeout timer armed.", "polite");
+    return;
+  }
+  if (displayState === "inbound") {
+    const talker = resolveTalker();
+    announce(`On air: inbound${talker ? ` from ${talker.callsign || talker.node}` : ""}.`, "polite");
+    return;
+  }
+  announce("Standby.", "polite");
+}
+
+// ── Inbound readout ──────────────────────────────────────────────────────────
+
+function resolveTalker() {
+  for (const node of state.activeLinks) {
+    const match = state.connectedNodes.find((n) => n.node === node);
+    return match || { node, callsign: "", info: "", location: "" };
+  }
+  return null;
+}
+
+function renderInbound() {
+  const talker = resolveTalker();
+  if (talker) {
+    els.inboundCall.textContent = talker.callsign || talker.node;
+    els.inboundNode.textContent = talker.callsign ? talker.node : "";
+    const via = talker.info || talker.location || "";
+    els.inboundVia.textContent = via ? `${via} · inbound` : "inbound";
+  } else {
+    els.inboundCall.textContent = "REMOTE";
+    els.inboundNode.textContent = "";
+    els.inboundVia.textContent = "inbound";
+  }
+  renderInboundTimer();
+}
+
+function renderInboundTimer() {
+  if (state.inboundSince == null) {
+    els.inboundTimer.textContent = "--:--";
+    return;
+  }
+  els.inboundTimer.textContent = formatCountdown((Date.now() - state.inboundSince) / 1000);
+}
+
+function startInboundTimer() {
+  if (state.inboundTimer) return;
+  renderInboundTimer();
+  state.inboundTimer = window.setInterval(renderInboundTimer, 1000);
+}
+
+function stopInboundTimer() {
+  if (state.inboundTimer) {
+    window.clearInterval(state.inboundTimer);
+    state.inboundTimer = null;
+  }
+}
+
+// ── Outbound readout + TOT engine ───────────────────────────────────────────
+
+function totSeconds() {
+  return Number(state.settings?.totSeconds ?? 180);
+}
+
+function armTot(armedAtMs) {
+  stopTotTimer();
+  state.tot.armedAtMs = armedAtMs;
+  state.tot.expired = false;
+  state.tot.lastRemain = null;
+  state.tot.warnBeeped = false;
+  // The 250ms tick only runs while outbound with a known arm time; the
+  // indeterminate ring (unknown arm time) and the off state are static.
+  if (armedAtMs != null && totSeconds() > 0) {
+    state.tot.timer = window.setInterval(totTick, TOT_TICK_MS);
+  }
+}
+
+function disarmTot() {
+  stopTotTimer();
+  state.tot.armedAtMs = null;
+  state.tot.expired = false;
+  state.tot.lastRemain = null;
+  state.tot.warnBeeped = false;
+}
+
+function stopTotTimer() {
+  if (state.tot.timer) {
+    window.clearInterval(state.tot.timer);
+    state.tot.timer = null;
+  }
+}
+
+function totTick() {
+  const { remain, phase } = totState(state.tot.armedAtMs, Date.now(), totSeconds());
+  renderTotRing(remain, phase);
+
+  if (state.settings?.totBeep) {
+    const last = state.tot.lastRemain;
+    // One beep at 60s remaining.
+    if (!state.tot.warnBeeped && remain <= 60 && (last == null || last > 60)) {
+      state.tot.warnBeeped = true;
+      beep(880, 150);
+    }
+    // One per second for the last 5.
+    if (remain > 0 && remain <= 5 && last != null && Math.ceil(remain) !== Math.ceil(last)) {
+      beep(1200, 70);
+    }
+  }
+  state.tot.lastRemain = remain;
+
+  if (phase === "expired" && !state.tot.expired) {
+    state.tot.expired = true;
+    stopTotTimer(); // CSS carries the alarm pulse; nothing left to count
+    pushTape({
+      kind: "tot", node: "__local__",
+      text: `${state.status?.callsign || "You"} timeout reached · ${formatCountdown(totSeconds())}`
+    });
+    if (state.settings?.totBeep) {
+      beep(1400, 120);
+      window.setTimeout(() => beep(1400, 120), 200);
+      window.setTimeout(() => beep(1400, 260), 400);
+    }
+    renderDisplay(); // flips the readout to the TIME-OUT alarm state
+  }
+}
+
+function renderOutbound() {
+  const callsign = state.status?.callsign || "—";
+  els.outboundCall.textContent = callsign;
+  els.outboundSub.textContent = `You · outbound to ${state.connectedCount} link${state.connectedCount === 1 ? "" : "s"}`;
+
+  const seconds = totSeconds();
+  if (seconds <= 0) {
+    els.totRing.hidden = true;
+    els.outboundTotLabel.textContent = "TOT off";
+    return;
+  }
+  els.totRing.hidden = false;
+
+  const { remain, phase } = totState(state.tot.armedAtMs, Date.now(), seconds);
+  renderTotRing(remain, phase);
+
+  if (phase === "indeterminate") {
+    els.outboundTotLabel.textContent = "TOT · arm time unknown";
+  } else {
+    els.outboundTotLabel.textContent = `TOT · re-keys reset to ${formatCountdown(seconds)}`;
+  }
+}
+
+function renderTotRing(remain, phase) {
+  const seconds = totSeconds();
+  if (phase === "indeterminate") {
+    els.totRing.dataset.phase = "indeterminate";
+    els.totRing.style.setProperty("--tot-pct", "1");
+    els.totRingTime.textContent = "--:--";
+    els.totRing.title = "Panel opened mid-keyup; timer arms on your next keyup";
+    return;
+  }
+  els.totRing.dataset.phase = phase;
+  els.totRing.style.setProperty("--tot-pct", String(seconds > 0 ? remain / seconds : 0));
+  els.totRingTime.textContent = phase === "expired" ? "TOT" : formatCountdown(remain);
+  els.totRing.title = `Timeout timer: ${formatCountdown(remain)} remaining of ${formatCountdown(seconds)}`;
+}
+
 // ---------------------------------------------------------------------------
-// Render
+// Traffic tape (Zone 2) -- one chronological event stream. The tape module
+// (services/tape.js) holds the data; this layer feeds it, renders it, and
+// persists it to session storage so a panel reload mid-net keeps history.
 // ---------------------------------------------------------------------------
 
-function renderStatusHeader() {
+const TAPE_TAGS = {
+  key: "Key", out: "You", link: "Link", drop: "Drop",
+  dtmf: "DTMF", cop: "COP", sched: "Sched", sys: "Sys", tot: "TOT",
+};
+
+// Diff the keyed set against the previous one, logging remote keyups/unkeys.
+// The first call adopts the current set without emitting rows (timer honesty:
+// a node already keyed when the panel opens has an unknown hold time).
+function syncActiveLinks(nextSet) {
+  const next = nextSet instanceof Set ? nextSet : new Set(nextSet || []);
+
+  if (!state.tapeInit) {
+    state.tapeInit = true;
+    state.prevActiveLinks = next;
+    state.activeLinks = next;
+    return;
+  }
+
+  const { newlyKeyed, newlyUnkeyed } = diffKeyedSets(state.prevActiveLinks, next);
+  const now = Date.now();
+  let changed = false;
+
+  for (const node of newlyKeyed) {
+    state.remoteKeyedSince[node] = now;
+    const callsign = talkerCallsign(node);
+    state.tape.push({ ts: now, kind: "key", node, callsign, live: true, text: keyRowText(node, callsign) });
+    changed = true;
+  }
+  for (const node of newlyUnkeyed) {
+    const since = state.remoteKeyedSince[node];
+    const holdMs = since ? now - since : undefined;
+    delete state.remoteKeyedSince[node];
+    const callsign = talkerCallsign(node);
+    const held = holdMs != null ? ` · ${formatHold(holdMs)}` : "";
+    state.tape.finalize("key", node, { ts: now, holdMs, text: `${keyRowText(node, callsign, false)}${held}` });
+    changed = true;
+  }
+
+  state.prevActiveLinks = next;
+  state.activeLinks = next;
+  if (changed) { renderTape(); scheduleTapeSave(); }
+}
+
+function talkerCallsign(node) {
+  return state.connectedNodes.find((n) => n.node === node)?.callsign || "";
+}
+
+function keyRowText(node, callsign, keyedSuffix = true) {
+  const who = callsign ? `${callsign} ${node}` : node;
+  return keyedSuffix ? `${who} · keyed` : who;
+}
+
+// Operator's own transmission (rxkeyed) start/finish rows.
+function pushOutStart() {
+  const call = state.status?.callsign || "You";
+  state.tape.push({ ts: Date.now(), kind: "out", node: "__local__", callsign: call, live: true, text: `${call} outbound · TOT armed` });
+  renderTape();
+  scheduleTapeSave();
+}
+
+function finalizeOut() {
+  const call = state.status?.callsign || "You";
+  const holdMs = state.tot.armedAtMs ? Date.now() - state.tot.armedAtMs : undefined;
+  const held = holdMs != null ? ` · ${formatHold(holdMs)}` : "";
+  const outcome = state.tot.expired ? " · TIMED OUT" : " · TOT ok";
+  state.tape.finalize("out", "__local__", { ts: Date.now(), holdMs, text: `${call} outbound${held}${outcome}` });
+  renderTape();
+  scheduleTapeSave();
+}
+
+function pushTape(entry) {
+  state.tape.push(entry);
+  renderTape();
+  scheduleTapeSave();
+}
+
+function renderTape() {
+  if (!els.tape) return;
+  const rows = state.tape.list(state.tapeFilter);
+  const scrollTop = els.tape.scrollTop;
+  els.tape.replaceChildren();
+
+  if (!rows.length) {
+    els.tape.appendChild(createEmptyState("No traffic yet."));
+    return;
+  }
+
+  for (const entry of rows) {
+    const row = document.createElement("div");
+    row.className = entry.live ? "t-row live" : "t-row";
+    row.dataset.k = entry.kind;
+
+    const time = document.createElement("span");
+    time.className = "t-time";
+    time.textContent = entry.live ? "now" : tapeTime(entry.ts);
+
+    const tag = document.createElement("span");
+    tag.className = "t-tag";
+    tag.textContent = TAPE_TAGS[entry.kind] || entry.kind;
+
+    const text = document.createElement("span");
+    text.className = "t-text";
+    text.textContent = entry.text;
+
+    row.append(time, tag, text);
+    els.tape.appendChild(row);
+  }
+  els.tape.scrollTop = scrollTop;
+}
+
+function tapeTime(ts) {
+  const d = new Date(ts);
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}:${String(d.getUTCSeconds()).padStart(2, "0")}`;
+}
+
+function handleTapeFilter(event) {
+  const btn = event.target.closest(".tf");
+  if (!btn) return;
+  state.tapeFilter = btn.dataset.filter || "all";
+  els.tapeFilters.querySelectorAll(".tf").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+  renderTape();
+}
+
+// Persist the newest entries to session storage (survives a panel reload
+// within the browser session, does not roam, does not burn sync quota).
+function scheduleTapeSave() {
+  if (state.tapeSaveTimer) return;
+  state.tapeSaveTimer = window.setTimeout(async () => {
+    state.tapeSaveTimer = null;
+    // Strip the live flag so a row that was mid-keyup at save time does not
+    // reload as a permanently "now" row after a panel reload.
+    const snapshot = state.tape.toJSON().map((entry) => ({ ...entry, live: false }));
+    try { await chrome.storage.session.set({ tapeEntries: snapshot }); } catch { /* non-critical */ }
+  }, 1000);
+}
+
+async function hydrateTape() {
+  try {
+    const result = await chrome.storage.session.get({ tapeEntries: null });
+    if (Array.isArray(result.tapeEntries)) state.tape.hydrate(result.tapeEntries);
+  } catch { /* non-critical */ }
+}
+
+// ── Standby clock + watch line ──────────────────────────────────────────────
+
+function renderClock() {
+  const d = new Date();
+  els.clockTime.textContent =
+    `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}:${String(d.getUTCSeconds()).padStart(2, "0")}`;
+}
+
+function startClock() {
+  if (state.clockTimer) return;
+  renderClock();
+  state.clockTimer = window.setInterval(renderClock, 1000);
+}
+
+function stopClock() {
+  if (state.clockTimer) {
+    window.clearInterval(state.clockTimer);
+    state.clockTimer = null;
+  }
+}
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function renderWatchLine() {
+  const weekday = DAY_NAMES[new Date().getUTCDay()];
+  const next = computeNextSchedule(state.schedules, new Date());
+  const nextText = formatNextScheduleLine(next);
+  els.clockWatch.textContent = nextText
+    ? `${weekday} · Net watch · ${nextText}`
+    : `${weekday} · Net watch`;
+}
+
+// ---------------------------------------------------------------------------
+// Bezel + micro stats render
+// ---------------------------------------------------------------------------
+
+function renderBezelAndStats() {
   const status = state.status || {};
 
-  els.statusNode.textContent = valueOrDash(status.node);
-  els.statusCallsign.textContent = valueOrDash(status.callsign);
-  els.statusKeyups.textContent = valueOrDash(status.keyups_today);
-  els.statusConnectedCount.textContent = String(state.connectedCount);
-  els.statusUptime.textContent = valueOrDash(status.uptime);
-  els.statusTxToday.textContent = valueOrDash(status.tx_time_today);
-  els.statusTxTotal.textContent = valueOrDash(status.tx_time_total);
-  renderKeyedIndicators();
+  els.bezelNode.textContent = status.node ? `ASL ${status.node}` : "ASL —";
+  els.bezelCallsign.textContent = status.callsign || "";
+  // Full base URL lives in the tooltip only.
+  if (state.settings?.baseUrl) {
+    els.bezelNode.title = state.settings.baseUrl;
+  } else {
+    els.bezelNode.removeAttribute("title");
+  }
+
+  els.statLinks.textContent = String(state.connectedCount);
+  els.statKeyups.textContent = valueOrDash(status.keyups_today);
+  els.statTxDay.textContent = valueOrDash(status.tx_time_today);
+  els.statUptime.textContent = valueOrDash(status.uptime);
   renderNodeCountWarning();
+}
+
+function clearBezelAndStats() {
+  els.bezelNode.textContent = "ASL —";
+  els.bezelCallsign.textContent = "";
+  els.statLinks.textContent = "—";
+  els.statKeyups.textContent = "—";
+  els.statTxDay.textContent = "—";
+  els.statUptime.textContent = "—";
+  els.nodeCountWarningBadge.hidden = true;
+  renderLinkBar();
 }
 
 function renderNodeCountWarning() {
@@ -562,208 +1093,277 @@ function renderNodeCountWarning() {
   const count = state.connectedCount;
   const over = threshold > 0 && count >= threshold;
   els.nodeCountWarningBadge.hidden = !over;
-  if (over) els.nodeCountWarningBadge.textContent = `⚠ ${count} NODES`;
+  if (over) els.nodeCountWarningBadge.textContent = `⚠ ${count}`;
 }
 
-function renderKeyedIndicators() {
-  // RX -- signal present on node input (someone is transmitting TO the node)
-  const rxKeyed = Boolean(state.variables?.rxkeyed);
-  els.statusRxKeyed.textContent = "RX";
-  els.statusRxKeyed.className = rxKeyed ? "keyed-badge rx active" : "keyed-badge rx";
-  els.statusRxKeyed.setAttribute("aria-label", rxKeyed ? "RX active, receiving" : "RX idle");
-
-  // TX -- node transmitter is active (node is transmitting OUT)
-  const txKeyed = Boolean(state.variables?.txkeyed);
-  els.statusTxKeyed.textContent = "TX";
-  els.statusTxKeyed.className = txKeyed ? "keyed-badge tx active" : "keyed-badge tx";
-  els.statusTxKeyed.setAttribute("aria-label", txKeyed ? "TX active, transmitting" : "TX idle");
+function setLiveLamp(kind, text) {
+  els.liveLamp.dataset.kind = kind;
+  els.liveLampText.textContent = text;
 }
 
-function clearStatusHeader() {
-  els.statusNode.textContent = "—";
-  els.statusCallsign.textContent = "—";
-  els.statusKeyups.textContent = "—";
-  els.statusConnectedCount.textContent = "—";
-  els.statusRxKeyed.textContent = "RX";
-  els.statusRxKeyed.className = "keyed-badge rx";
-  els.statusRxKeyed.setAttribute("aria-label", "RX idle");
-  els.statusTxKeyed.textContent = "TX";
-  els.statusTxKeyed.className = "keyed-badge tx";
-  els.statusTxKeyed.setAttribute("aria-label", "TX idle");
-  els.statusUptime.textContent = "—";
-  els.statusTxToday.textContent = "—";
-  els.statusTxTotal.textContent = "—";
-  els.activeNodeNumber.textContent = "—";
-  els.activeNodeCallsign.textContent = "";
-  els.activeNodeCallsign.hidden = true;
-  els.nodeCountWarningBadge.hidden = true;
+// ---------------------------------------------------------------------------
+// Link bar (chips) + popover
+// Replaces the v0.8 Connected Nodes list; per-node disconnect lives in the
+// chip popover now.
+// ---------------------------------------------------------------------------
+
+function renderLinkBar() {
+  const nodes = isReady() ? state.connectedNodes : [];
+
+  els.linkBar.replaceChildren();
+
+  if (!nodes.length) {
+    const empty = document.createElement("span");
+    empty.className = "chip-empty";
+    empty.textContent = isReady() ? "No links" : "Not configured";
+    els.linkBar.appendChild(empty);
+  }
+
+  for (const connectedNode of nodes) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    if (connectedNode.mode === "R") chip.classList.add("mon");
+    if (state.activeLinks.has(connectedNode.node)) chip.classList.add("keyed");
+    chip.dataset.node = connectedNode.node;
+    chip.setAttribute("aria-haspopup", "dialog");
+    chip.setAttribute("aria-label",
+      `Node ${connectedNode.node}${connectedNode.callsign ? `, ${connectedNode.callsign}` : ""}` +
+      `${connectedNode.mode === "R" ? ", monitor mode" : ""}` +
+      `${state.activeLinks.has(connectedNode.node) ? ", keyed" : ""}`);
+
+    const dot = document.createElement("i");
+    dot.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = connectedNode.callsign || connectedNode.node;
+
+    chip.append(dot, label);
+    els.linkBar.appendChild(chip);
+  }
+
+  // If a popover is open for a node that dropped, close it.
+  if (state.openPopover && !nodes.some((n) => n.node === state.openPopover.node)) {
+    closePopover({ restoreFocus: false });
+  }
+
+  // If the inbound talker readout is showing, its identity may have just
+  // been enriched by this refresh.
+  if (state.displayState === "inbound") renderInbound();
 }
 
-function renderActiveNode() {
-  const activeNode = state.connectedNodes.find((n) => state.activeLinks.has(n.node));
-  els.activeNodeNumber.textContent = activeNode?.node || "—";
-  els.activeNodeCallsign.textContent = activeNode?.callsign || "";
-  els.activeNodeCallsign.hidden = !activeNode?.callsign;
+function handleLinkBarClick(event) {
+  const chip = event.target.closest(".chip");
+  if (!chip) return;
+  const node = chip.dataset.node;
+  if (state.openPopover?.node === node) {
+    closePopover({ restoreFocus: true });
+    return;
+  }
+  openPopover(chip, node);
 }
 
-function renderConnectedTo() {
-  const ct = state.connectedTo;
-  els.connectedToNode.textContent = ct?.node || "—";
-  els.connectedToCallsign.textContent = ct?.callsign || "";
-  els.connectedToCallsign.hidden = !ct?.callsign;
+function openPopover(chip, node) {
+  closePopover({ restoreFocus: false });
+
+  const connectedNode = state.connectedNodes.find((n) => n.node === node);
+  if (!connectedNode) return;
+
+  const popover = document.createElement("div");
+  popover.className = "chip-popover";
+  popover.setAttribute("role", "dialog");
+  popover.setAttribute("aria-label", `Node ${connectedNode.node}`);
+  popover.tabIndex = -1;
+
+  const title = document.createElement("div");
+  title.className = "chip-popover-title";
+  title.textContent = connectedNode.callsign
+    ? `${connectedNode.callsign} · ${connectedNode.node}`
+    : connectedNode.node;
+  popover.appendChild(title);
+
+  const modeLine = document.createElement("div");
+  modeLine.className = "chip-popover-line";
+  modeLine.textContent = getModeLabel(connectedNode.mode);
+  popover.appendChild(modeLine);
+
+  if (connectedNode.info) {
+    const infoLine = document.createElement("div");
+    infoLine.className = "chip-popover-line";
+    infoLine.textContent = connectedNode.info;
+    popover.appendChild(infoLine);
+  }
+
+  if (connectedNode.location) {
+    const locLine = document.createElement("div");
+    locLine.className = "chip-popover-line";
+    locLine.textContent = connectedNode.location;
+    popover.appendChild(locLine);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "chip-popover-actions";
+  const discBtn = document.createElement("button");
+  discBtn.type = "button";
+  discBtn.className = "small danger";
+  discBtn.textContent = "Disconnect";
+  discBtn.setAttribute("aria-label", `Disconnect node ${connectedNode.node}`);
+  discBtn.addEventListener("click", () => {
+    closePopover({ restoreFocus: false });
+    runTimedOperation({
+      busyText: `Disconnecting ${node}…`,
+      action: async () => { await disconnectNode(node); },
+      successMessage: `Disconnect request sent for node ${node}.`
+    });
+  });
+  actions.appendChild(discBtn);
+  popover.appendChild(actions);
+
+  document.body.appendChild(popover);
+
+  // Position under the chip, clamped to the viewport.
+  const rect = chip.getBoundingClientRect();
+  const popRect = popover.getBoundingClientRect();
+  let left = rect.left;
+  if (left + popRect.width > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - popRect.width - 8);
+  }
+  let top = rect.bottom + 6;
+  if (top + popRect.height > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - popRect.height - 6);
+  }
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+
+  state.openPopover = { el: popover, node };
+  popover.focus();
 }
+
+function closePopover({ restoreFocus }) {
+  if (!state.openPopover) return;
+  const { el, node } = state.openPopover;
+  state.openPopover = null;
+  el.remove();
+  if (restoreFocus) {
+    const chip = els.linkBar.querySelector(`.chip[data-node="${CSS.escape(node)}"]`);
+    if (chip) chip.focus();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dock + drawers (Zone 3)
+// ---------------------------------------------------------------------------
+
+function handleDockClick(event) {
+  const key = event.target.closest(".dockkey");
+  if (!key) return;
+  const id = key.dataset.drawer;
+  if (state.openDrawer === id) { closeDrawers({ restoreFocus: true }); return; }
+  openDrawer(id);
+}
+
+function openDrawer(id) {
+  closeDrawers({ restoreFocus: false });
+  const drawer = document.getElementById(id);
+  const key = els.dock?.querySelector(`.dockkey[data-drawer="${id}"]`);
+  if (!drawer) return;
+  drawer.hidden = false;
+  if (key) key.setAttribute("aria-expanded", "true");
+  state.openDrawer = id;
+  // Move focus to the first control in the drawer for keyboard users.
+  const focusable = drawer.querySelector("input, button");
+  if (focusable) focusable.focus();
+}
+
+function closeDrawers({ restoreFocus }) {
+  if (!state.openDrawer) return;
+  const id = state.openDrawer;
+  const drawer = document.getElementById(id);
+  const key = els.dock?.querySelector(`.dockkey[data-drawer="${id}"]`);
+  if (drawer) drawer.hidden = true;
+  if (key) {
+    key.setAttribute("aria-expanded", "false");
+    if (restoreFocus) key.focus();
+  }
+  state.openDrawer = null;
+}
+
+function handleKeypadClick(event) {
+  const key = event.target.closest(".kp-key");
+  if (!key) return;
+  if (els.dtmfInput.value.length >= 30) return;
+  els.dtmfInput.value += key.textContent;
+  els.dtmfInput.focus();
+}
+
+async function handleDisconnectFirstChange() {
+  try { await storageSet({ disconnectFirst: Boolean(els.disconnectFirst.checked) }); }
+  catch { /* non-critical */ }
+}
+
+// ---------------------------------------------------------------------------
+// Memories (favorites) -- rendered as channel-memory cards in the Dock zone
+// ---------------------------------------------------------------------------
 
 function renderFavorites() {
   els.favoritesList.replaceChildren();
+  if (els.memCount) els.memCount.textContent = state.favorites.length ? `${state.favorites.length} saved` : "none";
 
   if (!state.favorites.length) {
-    els.favoritesList.appendChild(createEmptyState("No favorites configured."));
+    els.favoritesList.appendChild(createEmptyState("No memories configured."));
     return;
   }
 
   for (const favorite of state.favorites) {
     const item = document.createElement("div");
-    item.className = "favorite-item";
+    item.className = "mem";
+    item.dataset.favoriteNode = favorite.node;
 
-    const node = document.createElement("div");
-    node.className = "node-number";
-    node.textContent = favorite.node;
+    const head = document.createElement("div");
+    head.className = "mem-head";
+    const lamp = document.createElement("i");
+    lamp.className = "mem-lamp";
+    lamp.setAttribute("aria-hidden", "true");
+    const name = document.createElement("span");
+    name.className = "mem-name";
+    name.textContent = favorite.label || favorite.node;
+    name.title = favorite.label || favorite.node;
+    head.append(lamp, name);
 
-    const label = document.createElement("div");
-    label.className = "node-label";
-    label.textContent = favorite.label || favorite.node;
-    label.title = favorite.label || favorite.node;
+    const meta = document.createElement("div");
+    meta.className = "mem-meta";
+    const num = document.createElement("span");
+    num.className = "mem-node";
+    num.textContent = favorite.node;
+    const status = document.createElement("span");
+    status.className = "favorite-status";
+    status.textContent = "--";
+    meta.append(num, status);
+
+    const meter = document.createElement("div");
+    meter.className = "mem-meter";
+    const fill = document.createElement("i");
+    meter.appendChild(fill);
 
     const actions = document.createElement("div");
-    actions.className = "favorite-actions";
-
+    actions.className = "mem-actions";
     const connectT = document.createElement("button");
     connectT.type = "button";
-    connectT.textContent = "Connect T";
+    connectT.className = "small";
+    connectT.textContent = "Conn T";
     connectT.dataset.favoriteNode = favorite.node;
     connectT.dataset.favoriteMode = "transceive";
-
     const connectR = document.createElement("button");
     connectR.type = "button";
-    connectR.className = "secondary";
-    connectR.textContent = "Monitor R";
+    connectR.className = "small secondary";
+    connectR.textContent = "Mon R";
     connectR.dataset.favoriteNode = favorite.node;
     connectR.dataset.favoriteMode = "monitor";
-
     actions.append(connectT, connectR);
-    item.dataset.favoriteNode = favorite.node;
-    item.append(node, label, actions);
+
+    item.append(head, meta, meter, actions);
     els.favoritesList.appendChild(item);
   }
-}
-
-function renderConnectedNodes(nodes) {
-  els.connectedNodesList.replaceChildren();
-
-  if (!nodes.length) {
-    els.connectedNodesList.appendChild(createEmptyState("No connected nodes."));
-    return;
-  }
-
-  for (const connectedNode of nodes) {
-    const item = document.createElement("div");
-    item.className = "connected-node-item";
-
-    const nodeWrap = document.createElement("div");
-    nodeWrap.className = "node-identity";
-
-    const node = document.createElement("div");
-    node.className = "node-number";
-    node.textContent = connectedNode.node;
-
-    if (connectedNode.callsign) {
-      const callsign = document.createElement("div");
-      callsign.className = "node-callsign";
-      callsign.textContent = connectedNode.callsign;
-      if (connectedNode.location) callsign.title = connectedNode.location;
-      nodeWrap.append(node, callsign);
-    } else {
-      nodeWrap.appendChild(node);
-    }
-
-    const mode = document.createElement("span");
-    mode.className = `mode-badge ${connectedNode.mode.toLowerCase()}`;
-    mode.textContent = connectedNode.mode;
-    mode.title = getModeLabel(connectedNode.mode);
-
-    // When the backend sends no info string, leave this column empty -- the
-    // mode badge (plus its title/aria-label) already carries the T/R mode,
-    // so falling back to getModeLabel() here just restated the badge.
-    const info = document.createElement("div");
-    info.className = "node-info";
-    info.textContent = connectedNode.info || "";
-    info.title = connectedNode.info || "";
-
-    if (state.activeLinks.has(connectedNode.node)) {
-      item.classList.add("transmitting");
-    }
-
-    const discBtn = document.createElement("button");
-    discBtn.type = "button";
-    discBtn.className = "small danger";
-    discBtn.textContent = "Disc";
-    discBtn.title = `Disconnect node ${connectedNode.node}`;
-    discBtn.setAttribute("aria-label", `Disconnect node ${connectedNode.node}`);
-    discBtn.dataset.disconnectNode = connectedNode.node;
-
-    item.append(nodeWrap, mode, info, discBtn);
-    els.connectedNodesList.appendChild(item);
-  }
-
-  renderActiveNode();
-}
-
-function handleConnectedNodesClick(event) {
-  const button = event.target.closest("[data-disconnect-node]");
-  if (!button) return;
-  const node = button.dataset.disconnectNode;
-  runTimedOperation({
-    busyText: `Disconnecting ${node}…`,
-    action: async () => { await disconnectNode(node); },
-    successMessage: `Disconnect request sent for node ${node}.`
-  });
-}
-
-function renderEmptyConnectedNodes(message) {
-  els.connectedNodesList.replaceChildren(createEmptyState(message));
-}
-
-function renderAudit(audit) {
-  const entries = Array.isArray(audit?.entries) ? audit.entries : [];
-
-  els.auditLog.replaceChildren();
-
-  if (!entries.length) {
-    els.auditLog.appendChild(createEmptyState("No audit entries."));
-    return;
-  }
-
-  for (const entry of entries) {
-    const row = document.createElement("div");
-    row.className = "audit-entry";
-    // Handle both structured (v1.4+) and raw string (legacy) entries
-    if (entry && typeof entry === "object" && entry.timestamp) {
-      const d = new Date(entry.timestamp);
-      const time = Number.isNaN(d.getTime())
-        ? entry.timestamp
-        : d.toISOString().slice(0, 19).replace("T", " ") + " Z";
-      const cmd  = entry.command || "";
-      const det  = entry.details ? ` — ${entry.details}` : "";
-      row.textContent = `${time}  ${cmd}${det}`;
-    } else {
-      row.textContent = String(entry);
-    }
-    els.auditLog.appendChild(row);
-  }
-}
-
-function renderEmptyAudit(message) {
-  els.auditLog.replaceChildren(createEmptyState(message));
+  renderFavoritesStatus();
 }
 
 // ---------------------------------------------------------------------------
@@ -841,23 +1441,23 @@ function handleOpenSettings() {
   window.open("options.html", "_blank", "noopener");
 }
 
+// AllScan-style "disconnect current links first": drop everything, pause
+// briefly for the node to settle, then connect the target.
+async function maybeDisconnectFirst() {
+  if (!els.disconnectFirst?.checked) return;
+  await disconnectAll();
+  await sleep(500);
+}
+
 function handleConnectFromInput(monitorOnly) {
   const node = els.connectNodeInput.value.trim();
   runTimedOperation({
     busyText: monitorOnly ? `Connecting to ${node} in monitor-only mode…` : `Connecting to ${node} in transceive mode…`,
     action: async () => {
+      await maybeDisconnectFirst();
       await connectNode(node, { monitorOnly });
-      // Resolve callsign from lookup result or API
-      let callsign = "";
-      if (!els.nodeLookupResult.hidden && els.nodeLookupResult.textContent) {
-        callsign = els.nodeLookupResult.textContent.split("—")[0].trim();
-      } else {
-        try { const r = await lookupNode(node); callsign = r?.callsign || ""; } catch { /* silent */ }
-      }
-      state.connectedTo = { node, callsign };
-      try { sessionStorage.setItem("asl_connected_to", JSON.stringify(state.connectedTo)); } catch { /* non-critical */ }
-      renderConnectedTo();
       els.connectNodeInput.value = "";
+      closeDrawers({ restoreFocus: false });
     },
     successMessage: monitorOnly ? `Monitor-only connect request sent for node ${node}.` : `Transceive connect request sent for node ${node}.`
   });
@@ -871,12 +1471,9 @@ function handleFavoritesClick(event) {
   runTimedOperation({
     busyText: monitorOnly ? `Connecting favorite ${node} in monitor-only mode…` : `Connecting favorite ${node} in transceive mode…`,
     action: async () => {
+      await maybeDisconnectFirst();
       await connectNode(node, { monitorOnly });
-      let callsign = "";
-      try { const r = await lookupNode(node); callsign = r?.callsign || ""; } catch { /* silent */ }
-      state.connectedTo = { node, callsign };
-      try { sessionStorage.setItem("asl_connected_to", JSON.stringify(state.connectedTo)); } catch { /* non-critical */ }
-      renderConnectedTo();
+      closeDrawers({ restoreFocus: false });
     },
     successMessage: monitorOnly ? `Monitor-only connect request sent for favorite ${node}.` : `Transceive connect request sent for favorite ${node}.`
   });
@@ -889,9 +1486,6 @@ function handleDisconnectAll() {
     busyText: "Disconnecting all nodes…",
     action: async () => {
       await disconnectAll();
-      state.connectedTo = null;
-      sessionStorage.removeItem("asl_connected_to");
-      renderConnectedTo();
     },
     successMessage: "Disconnect-all request sent.",
     postDelayMs: 3000
@@ -902,7 +1496,11 @@ function handleSendDtmf() {
   const sequence = els.dtmfInput.value.trim();
   runImmediateOperation({
     busyText: `Sending DTMF ${sequence}…`,
-    action: async () => { await sendDtmf(sequence, { confirmed: true }); els.dtmfInput.value = ""; },
+    action: async () => {
+      await sendDtmf(sequence, { confirmed: true });
+      pushTape({ kind: "dtmf", text: `${sequence} sent` });
+      els.dtmfInput.value = "";
+    },
     successMessage: `DTMF sequence ${sequence} sent.`
   });
 }
@@ -930,7 +1528,6 @@ async function runImmediateOperation({ busyText, action, successMessage }) {
   setBusy(true, busyText);
   try {
     await action();
-    await refreshAudit({ manual: false, force: true, silent: true });
     setFooter(successMessage, "success", 3000);
   } catch (error) {
     console.error(error);
@@ -945,7 +1542,7 @@ async function handleCop(command) {
   const labels  = { identify: "Identify", time: "Time", status: "Status", version: "Version" };
   runImmediateOperation({
     busyText: `Sending COP ${labels[command]}…`,
-    action: () => actions[command](),
+    action: async () => { await actions[command](); pushTape({ kind: "cop", text: `${labels[command]} sent` }); },
     successMessage: `COP ${labels[command]} sent.`
   });
 }
@@ -970,6 +1567,27 @@ function stopAutoRefresh() {
 }
 
 // ---------------------------------------------------------------------------
+// WebAudio beeps (no audio assets); gated by settings at each call site
+// ---------------------------------------------------------------------------
+
+let audioCtx = null;
+
+function beep(freq, ms) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.frequency.value = freq;
+    osc.type = "square";
+    gain.gain.value = 0.05;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + ms / 1000);
+  } catch { /* audio unavailable -- never let a beep break the panel */ }
+}
+
+// ---------------------------------------------------------------------------
 // Utility
 // ---------------------------------------------------------------------------
 
@@ -984,7 +1602,7 @@ function updateControlAvailability() {
   const configured = isReady();
   const controls = document.querySelectorAll("button, input");
   for (const control of controls) {
-    if (control.id === "openSettings") { control.disabled = false; continue; }
+    if (control.id === "openSettings" || control.id === "liveLamp") { control.disabled = false; continue; }
     // Section toggles and the theme toggle stay usable even when unconfigured
     // or busy -- otherwise keyboard users can't even collapse sections before
     // configuring the extension, a keyboard trap.
@@ -1000,13 +1618,9 @@ function updateControlAvailability() {
 function setConnectionStatus(message) {
   const prev = els.connectionStatus.textContent;
   els.connectionStatus.textContent = message;
-  // The status line shows host:port only (see hostOnly()) to avoid wrapping
-  // in a 400px panel; the full base URL is still available on hover/focus.
-  if (state.settings?.baseUrl) {
-    els.connectionStatus.title = state.settings.baseUrl;
-  } else {
-    els.connectionStatus.removeAttribute("title");
-  }
+  // The visible connection state is the bezel lamp (see setLiveLamp); this
+  // sr-only line carries the detail for screen readers. The full base URL
+  // is available on the bezel ident tooltip.
   if (state.screenReaderMode && message && message !== prev) announce(message, "polite");
 }
 
@@ -1051,6 +1665,12 @@ function requireElement(id) {
   const element = document.getElementById(id);
   if (!element) throw new Error(`Missing required element: #${id}`);
   return element;
+}
+
+function describeScheduleAction(schedule) {
+  if (schedule.action === "disconnect-all") return "Disconnect All";
+  if (schedule.action === "disconnect") return `Disconnect ${schedule.node}`;
+  return `Connect to ${schedule.node}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1137,7 +1757,6 @@ function renderDtmfMacros() {
 const ASL_STATS_BASE = "https://stats.allstarlink.org/api";
 const FAVORITES_STATS_INTERVAL_MS = 60000; // poll external API at most once per minute
 let favoritesStatusCache = {};
-let favoritesStatsTimer = null;
 let favoritesStatsLastRun = 0;
 
 async function fetchFavoriteStats(nodeNumber) {
@@ -1150,7 +1769,8 @@ async function fetchFavoriteStats(nodeNumber) {
     if (!data) return null;
     return {
       linkedCount: Array.isArray(data.links) ? data.links.length : 0,
-      keyed: Boolean(data.keyed)
+      keyed: Boolean(data.keyed),
+      busyPct: computeBusyPercent(data.totaltxtime, data.apprptuptime)
     };
   } catch { return null; }
 }
@@ -1174,48 +1794,32 @@ async function refreshFavoritesStatus() {
 }
 
 function renderFavoritesStatus() {
-  const items = els.favoritesList.querySelectorAll(".favorite-item");
+  const items = els.favoritesList.querySelectorAll(".mem");
   items.forEach((item) => {
     const node = item.dataset.favoriteNode;
     if (!node) return;
     const stats = favoritesStatusCache[node];
-    let badge = item.querySelector(".favorite-status");
-    if (!badge) { badge = document.createElement("div"); badge.className = "favorite-status"; item.appendChild(badge); }
-    if (stats) {
-      badge.textContent = `${stats.linkedCount} linked${stats.keyed ? " · KEYED" : ""}`;
-      badge.className = `favorite-status${stats.keyed ? " keyed" : ""}`;
-    } else {
-      badge.textContent = "--";
-      badge.className = "favorite-status";
+    const badge = item.querySelector(".favorite-status");
+    const fill = item.querySelector(".mem-meter i");
+    const connected = state.connectedNodes.some((n) => n.node === node);
+
+    // Lamp: amber if this memory is currently a connected link, green if the
+    // node is up/reporting to the stats API, off otherwise.
+    item.classList.toggle("conn", connected);
+    item.classList.toggle("up", !connected && Boolean(stats));
+
+    if (badge) {
+      if (stats) {
+        const busy = stats.busyPct == null ? "" : `busy ${Math.round(stats.busyPct)}% · `;
+        badge.textContent = `${busy}${stats.linkedCount}L${stats.keyed ? " · KEYED" : ""}`;
+        badge.className = `favorite-status${stats.keyed ? " keyed" : ""}`;
+      } else {
+        badge.textContent = connected ? "connected" : "--";
+        badge.className = "favorite-status";
+      }
     }
+    if (fill) fill.style.width = stats && stats.busyPct != null ? `${Math.round(stats.busyPct)}%` : "0%";
   });
-}
-
-// ---------------------------------------------------------------------------
-// Schedule indicator
-// Execution now lives in background.js (chrome.alarms) so schedules fire
-// even while the panel is closed; this file only displays what's next and
-// reacts to the SCHEDULE_FIRED message the worker sends after each run.
-// ---------------------------------------------------------------------------
-
-function renderScheduleIndicator() {
-  if (!state.schedules.length) { els.scheduleIndicator.hidden = true; return; }
-  const enabled = state.schedules.filter((s) => s.enabled);
-  if (!enabled.length) { els.scheduleIndicator.hidden = true; return; }
-  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const next = enabled.map((s) => {
-    const day = DAY_NAMES[s.days[0]] || "?";
-    const time = `${String(s.hour).padStart(2,"0")}:${String(s.minute).padStart(2,"0")}`;
-    return `${s.action === "disconnect-all" ? "Disc All" : `${s.action} ${s.node}`} @ ${day} ${time}`;
-  }).slice(0, 2).join(" | ");
-  els.scheduleIndicator.textContent = `⏱ ${next}`;
-  els.scheduleIndicator.hidden = false;
-}
-
-function describeScheduleAction(schedule) {
-  if (schedule.action === "disconnect-all") return "Disconnect All";
-  if (schedule.action === "disconnect") return `Disconnect ${schedule.node}`;
-  return `Connect to ${schedule.node}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1288,6 +1892,9 @@ function cleanup() {
   stopAutoRefresh();
   stopSlowPoll();
   stopEventStream();
+  stopClock();
+  stopInboundTimer();
+  stopTotTimer();
   window.clearTimeout(state.footerTimer);
 }
 

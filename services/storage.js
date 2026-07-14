@@ -15,7 +15,15 @@ export const STORAGE_DEFAULTS = {
   nodeCountWarning: 0,
   themeSettings: null,
   screenReaderMode: false,
+  // v0.9 "Faceplate" -- Timeout Timer (Zone 1 Display)
+  totSeconds: 180,      // 0 = off, otherwise one of TOT_SECONDS_OPTIONS
+  totBeep: false,       // WebAudio warning beeps, off by default
+  keyupBeep: false,     // optional courtesy beep on every keyup, off by default
+  // v0.9 "Faceplate" -- Dock (Zone 3 Connect drawer)
+  disconnectFirst: false, // AllScan-style "disconnect current links first"
 };
+
+export const TOT_SECONDS_OPTIONS = [0, 120, 150, 180];
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -83,6 +91,10 @@ export function normalizeSettings(raw) {
     nodeCountWarning: Number(raw?.nodeCountWarning) || 0,
     themeSettings:    raw?.themeSettings ?? null,
     screenReaderMode: Boolean(raw?.screenReaderMode),
+    totSeconds:       TOT_SECONDS_OPTIONS.includes(Number(raw?.totSeconds)) ? Number(raw.totSeconds) : 180,
+    totBeep:          Boolean(raw?.totBeep),
+    keyupBeep:        Boolean(raw?.keyupBeep),
+    disconnectFirst:  Boolean(raw?.disconnectFirst),
   };
 }
 

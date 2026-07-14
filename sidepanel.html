@@ -11,188 +11,173 @@
 
 <body>
   <main class="app-shell" role="main">
-    <header class="status-header" aria-labelledby="app-title">
-      <div class="title-row">
-        <div>
-          <h1 id="app-title">ASL Node Panel</h1>
-          <p id="connectionStatus" class="muted">Not connected</p>
-        </div>
 
+    <!-- ═══════════════ ZONE 1: THE DISPLAY (fixed, never scrolls) ═══════════════ -->
+    <header class="bezel" role="banner" aria-labelledby="app-title">
+      <div class="bezel-top">
+        <div class="bezel-brand">
+          <h1 id="app-title"><span id="bezelNode">ASL —</span></h1>
+          <span id="bezelCallsign" class="bezel-callsign"></span>
+        </div>
         <div class="header-actions">
-          <button id="toggleMode" class="icon-button mode-toggle-btn" type="button" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
-            ☀
+          <button type="button" class="live-lamp" id="liveLamp" data-kind="offline" title="Retry live connection">
+            <i aria-hidden="true"></i>
+            <span id="liveLampText">Offline</span>
           </button>
-          <button id="openSettings" class="icon-button" type="button" title="Open settings" aria-label="Open settings">
-            ⚙
-          </button>
+          <button id="toggleMode" class="icon-button mode-toggle-btn" type="button" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">☀</button>
+          <button id="openSettings" class="icon-button" type="button" title="Open settings" aria-label="Open settings">⚙</button>
         </div>
       </div>
+      <p id="connectionStatus" class="sr-only">Not connected</p>
 
-      <section class="node-summary" aria-label="Node status summary">
-        <div class="summary-card">
-          <span class="summary-label" id="lbl-node">Node</span>
-          <strong id="statusNode" aria-labelledby="lbl-node">—</strong>
-        </div>
-
-        <div class="summary-card">
-          <span class="summary-label" id="lbl-callsign">Callsign</span>
-          <strong id="statusCallsign" aria-labelledby="lbl-callsign">—</strong>
-        </div>
-
-        <div class="summary-card">
-          <span class="summary-label" id="lbl-keyups">Keyups Today</span>
-          <strong id="statusKeyups" aria-labelledby="lbl-keyups">—</strong>
+      <div class="glass" id="glass" data-state="standby">
+        <div class="glass-row1">
+          <div class="glass-state">
+            <span class="glass-lamp" id="glassLamp" aria-hidden="true"></span>
+            <span class="glass-word" id="glassWord" role="status">Standby</span>
+          </div>
+          <span class="glass-mode" id="glassMode">Monitoring</span>
         </div>
 
-        <div class="summary-card">
-          <span class="summary-label" id="lbl-connected">Connected Nodes</span>
-          <strong id="statusConnectedCount" aria-labelledby="lbl-connected">—</strong>
+        <div class="glass-main">
+          <!-- standby: shack clock -->
+          <div class="glass-clock" id="glassClock" hidden>
+            <div class="clock-utc"><span id="clockTime">00:00:00</span> <small>UTC</small></div>
+            <div class="clock-watch" id="clockWatch">Net watch</div>
+          </div>
+
+          <!-- inbound: remote talker -->
+          <div class="glass-inbound" id="glassInbound" hidden>
+            <div class="inbound-call" id="inboundCall">—</div>
+            <div class="inbound-sub">
+              <span class="inbound-node" id="inboundNode"></span>
+              <span class="inbound-via" id="inboundVia"></span>
+              <span class="inbound-timer" id="inboundTimer">0:00</span>
+            </div>
+          </div>
+
+          <!-- outbound: operator + TOT ring -->
+          <div class="glass-outbound" id="glassOutbound" hidden>
+            <div class="outbound-who">
+              <div class="outbound-call" id="outboundCall">—</div>
+              <div class="outbound-sub" id="outboundSub"></div>
+              <div class="outbound-tot-label" id="outboundTotLabel">TOT</div>
+            </div>
+            <div class="tot-ring" id="totRing" title="">
+              <div class="tot-ring-face">
+                <span class="tot-ring-t" id="totRingTime">--:--</span>
+                <span class="tot-ring-s">remain</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-duplex-note" id="duplexNote" hidden>+ inbound</div>
         </div>
-      <div class="summary-card active-node-card">
-          <span class="summary-label" id="lbl-active-node">Active TX</span>
-          <strong id="activeNodeNumber" aria-labelledby="lbl-active-node">—</strong>
-          <span id="activeNodeCallsign" class="active-node-callsign" hidden></span>
+
+        <div class="glass-ribbon" id="ribbon" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
         </div>
-        <div class="summary-card keyed-card">
-          <span id="statusRxKeyed" class="keyed-badge rx"></span>
-          <span id="statusTxKeyed" class="keyed-badge tx"></span>
+
+        <div class="glass-links-row">
+          <div class="glass-links" id="linkBar" role="group" aria-label="Connected nodes"></div>
+          <button id="disconnectAll" class="danger small link-disconnect-all" type="button">Disc All</button>
         </div>
-      </section>
-      <div class="connected-to-bar">
-        <span class="connected-to-label">Connected To</span>
-        <span id="connectedToNode" class="connected-to-node">—</span>
-        <span id="connectedToCallsign" class="connected-to-callsign" hidden></span>
-      </div>
-      <div class="node-stats-row">
-        <div class="stat-pill"><span class="stat-label">TX Today</span><span id="statusTxToday">—</span></div>
-        <div class="stat-pill"><span class="stat-label">TX Total</span><span id="statusTxTotal">—</span></div>
-        <div class="stat-pill"><span class="stat-label">Uptime</span><span id="statusUptime">—</span></div>
-        <div id="nodeCountWarningBadge" class="node-count-warning" hidden>⚠ HIGH CONN</div>
+
+        <div class="glass-stats" id="microStats">
+          <div><span class="k">Links</span><span class="v" id="statLinks">—</span></div>
+          <div><span class="k">Keyups</span><span class="v" id="statKeyups">—</span></div>
+          <div><span class="k">TX Day</span><span class="v" id="statTxDay">—</span></div>
+          <div><span class="k">Up</span><span class="v" id="statUptime">—</span></div>
+          <span id="nodeCountWarningBadge" class="node-count-warning" hidden>⚠</span>
+        </div>
       </div>
     </header>
 
-    <section class="panel-section" aria-labelledby="toggle-connect">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-connect" aria-expanded="true" aria-controls="connect-body">Connect Node <span class="toggle-icon">▾</span></button>
-      </div>
-      <div class="section-body" id="connect-body">
+    <div id="busyMessage" class="busy-message" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="busyText">Working…</span>
+    </div>
 
-      <form id="connectForm" class="connect-form" aria-label="Connect to a node">
-        <label class="sr-only" for="connectNodeInput">Node number</label>
-        <input
-          id="connectNodeInput"
-          type="text"
-          inputmode="numeric"
-          placeholder="Enter node number"
-          autocomplete="off"
-          spellcheck="false"
-        />
-
-        <div id="nodeLookupResult" class="node-lookup-result" hidden></div>
-
-        <div class="button-row">
-          <button id="connectTransceive" type="submit" data-connect-mode="transceive">
-            Connect T
-          </button>
-
-          <button id="connectMonitor" class="secondary" type="button" data-connect-mode="monitor">
-            Monitor R
-          </button>
-        </div>
-      </form>
-      </div>
-    </section>
-
-    <section class="panel-section" aria-labelledby="toggle-favorites">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-favorites" aria-expanded="true" aria-controls="favorites-body">Favorites <span class="toggle-icon">▾</span></button>
-        <button id="refreshFavorites" class="small secondary" type="button">Refresh</button>
-      </div>
-      <div class="section-body" id="favorites-body">
-
-      <div id="favoritesList" class="favorites-list">
-        <div class="empty-state">No favorites configured.</div>
-      </div>
-      </div>
-    </section>
-
-    <section class="panel-section connected-section" aria-labelledby="toggle-connected">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-connected" aria-expanded="true" aria-controls="connected-body">Connected Nodes <span class="toggle-icon">▾</span></button>
-        <div class="section-actions">
-          <button id="refreshStatus" class="small secondary" type="button">Refresh</button>
-          <button id="disconnectAll" class="small danger" type="button">Disconnect All</button>
+    <!-- ═══════════════ ZONE 2: THE TRAFFIC TAPE (the only scrolling region) ═══════════════ -->
+    <section class="tape-zone" aria-labelledby="tapeLabel">
+      <div class="tape-head">
+        <span class="tape-label" id="tapeLabel">Traffic</span>
+        <div class="tape-filters" role="group" aria-label="Filter traffic">
+          <button class="tf" type="button" data-filter="all" aria-pressed="true">All</button>
+          <button class="tf" type="button" data-filter="keyups" aria-pressed="false">Keyups</button>
+          <button class="tf" type="button" data-filter="links" aria-pressed="false">Links</button>
+          <button class="tf" type="button" data-filter="cmds" aria-pressed="false">Cmds</button>
         </div>
       </div>
-      <div class="section-body" id="connected-body">
-
-      <div id="busyMessage" class="busy-message" hidden>
-        <span class="spinner" aria-hidden="true"></span>
-        <span id="busyText">Working…</span>
-      </div>
-
-      <div id="connectedNodesList" class="connected-nodes-list">
-        <div class="empty-state">No connected nodes loaded yet.</div>
-      </div>
-      </div>
+      <div class="tape" id="tape"></div>
     </section>
 
-    <section class="panel-section" aria-labelledby="toggle-cop">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-cop" aria-expanded="true" aria-controls="cop-body">COP Controls <span class="toggle-icon">▾</span></button>
-      </div>
-      <div class="section-body" id="cop-body">
-        <div class="cop-grid">
-          <button id="copIdentify" type="button">Identify</button>
-          <button id="copTime" type="button" class="secondary">Time</button>
-          <button id="copStatus" type="button" class="secondary">Status</button>
-          <button id="copVersion" type="button" class="secondary">Version</button>
-        </div>
-      </div>
-    </section>
+    <!-- Old body sections below are being migrated zone by zone; each stays
+         fully wired until its replacement zone lands, so the panel is always
+         loadable and functional mid-rebuild. -->
 
-    <section class="panel-section" aria-labelledby="toggle-dtmf">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-dtmf" aria-expanded="true" aria-controls="dtmf-body">DTMF <span class="toggle-icon">▾</span></button>
+    <!-- ═══════════════ ZONE 3: THE DOCK + DRAWERS (fixed bottom) ═══════════════ -->
+    <div class="dock-zone">
+
+      <!-- Connect drawer -->
+      <div class="drawer" id="drawer-connect" role="region" aria-label="Connect node" hidden>
+        <div class="drawer-head"><span class="drawer-title">Connect Node</span><button type="button" class="drawer-close" data-drawer-close aria-label="Close">✕</button></div>
+        <form id="connectForm" class="connect-form" aria-label="Connect to a node">
+          <label class="sr-only" for="connectNodeInput">Node number</label>
+          <input id="connectNodeInput" type="text" inputmode="numeric" placeholder="Enter node number" autocomplete="off" spellcheck="false" />
+          <div id="nodeLookupResult" class="node-lookup-result" hidden></div>
+          <div class="button-row">
+            <button id="connectTransceive" type="submit" data-connect-mode="transceive">Connect T</button>
+            <button id="connectMonitor" class="secondary" type="button" data-connect-mode="monitor">Monitor R</button>
+          </div>
+          <label class="disc-first"><input type="checkbox" id="disconnectFirst" /> Disconnect current links first</label>
+        </form>
       </div>
-      <div class="section-body" id="dtmf-body">
+
+      <!-- Keypad drawer -->
+      <div class="drawer" id="drawer-keypad" role="region" aria-label="DTMF keypad" hidden>
+        <div class="drawer-head"><span class="drawer-title">DTMF Keypad</span><button type="button" class="drawer-close" data-drawer-close aria-label="Close">✕</button></div>
+        <form id="dtmfForm" class="dtmf-strip" aria-label="Send DTMF sequence">
+          <label class="sr-only" for="dtmfInput">DTMF sequence</label>
+          <input id="dtmfInput" type="text" placeholder="Sequence" autocomplete="off" spellcheck="false" />
+          <button id="sendDtmf" type="submit">Send</button>
+        </form>
         <div id="dtmfMacrosGrid" class="dtmf-macros-grid"></div>
-
-      <form id="dtmfForm" class="dtmf-form" aria-label="Send DTMF sequence">
-        <label class="sr-only" for="dtmfInput">DTMF sequence</label>
-        <input
-          id="dtmfInput"
-          type="text"
-          placeholder="DTMF sequence"
-          autocomplete="off"
-          spellcheck="false"
-        />
-
-        <button id="sendDtmf" type="submit">
-          Send
-        </button>
-      </form>
-
-      <p class="hint">
-        DTMF requests are sent with <code>confirmed: true</code>.
-      </p>
+        <div class="kp-grid" id="kpGrid" role="group" aria-label="Keypad">
+          <button type="button" class="kp-key">1</button><button type="button" class="kp-key">2</button><button type="button" class="kp-key">3</button><button type="button" class="kp-key">A</button>
+          <button type="button" class="kp-key">4</button><button type="button" class="kp-key">5</button><button type="button" class="kp-key">6</button><button type="button" class="kp-key">B</button>
+          <button type="button" class="kp-key">7</button><button type="button" class="kp-key">8</button><button type="button" class="kp-key">9</button><button type="button" class="kp-key">C</button>
+          <button type="button" class="kp-key">*</button><button type="button" class="kp-key">0</button><button type="button" class="kp-key">#</button><button type="button" class="kp-key">D</button>
+        </div>
       </div>
-    </section>
 
-    <section class="panel-section audit-section" aria-labelledby="toggle-audit">
-      <div class="section-title-row">
-        <button class="section-toggle" id="toggle-audit" aria-expanded="true" aria-controls="audit-body">Audit Log <span class="toggle-icon">▾</span></button>
-        <button id="refreshAudit" class="small secondary" type="button">Refresh</button>
+      <!-- Memories drawer -->
+      <div class="drawer" id="drawer-memories" role="region" aria-label="Memories" hidden>
+        <div class="drawer-head"><span class="drawer-title">Memories</span><button id="refreshFavorites" class="small secondary" type="button">Refresh</button></div>
+        <div id="favoritesList" class="mem-grid">
+          <div class="empty-state">No memories configured.</div>
+        </div>
       </div>
-      <div class="section-body" id="audit-body">
 
-      <div id="auditLog" class="audit-log">
-        <div class="empty-state">No audit entries loaded yet.</div>
+      <!-- COP drawer -->
+      <div class="drawer" id="drawer-cop" role="region" aria-label="Control operator commands" hidden>
+        <div class="drawer-head"><span class="drawer-title">COP · Control Operator</span><button type="button" class="drawer-close" data-drawer-close aria-label="Close">✕</button></div>
+        <div class="cop-grid">
+          <button id="copIdentify" type="button"><b>F1</b>Ident</button>
+          <button id="copTime" type="button" class="secondary"><b>F2</b>Time</button>
+          <button id="copStatus" type="button" class="secondary"><b>F3</b>Status</button>
+          <button id="copVersion" type="button" class="secondary"><b>F4</b>Version</button>
+        </div>
       </div>
-      </div>
-    </section>
 
-    <div id="scheduleIndicator" class="schedule-indicator" hidden></div>
+      <div class="dock" role="group" aria-label="Controls">
+        <button type="button" class="dockkey" data-drawer="drawer-connect" aria-expanded="false" aria-controls="drawer-connect">Connect<small>node #</small></button>
+        <button type="button" class="dockkey" data-drawer="drawer-keypad" aria-expanded="false" aria-controls="drawer-keypad">Keypad<small>DTMF</small></button>
+        <button type="button" class="dockkey" data-drawer="drawer-memories" aria-expanded="false" aria-controls="drawer-memories">Memories<small id="memCount">saved</small></button>
+        <button type="button" class="dockkey" data-drawer="drawer-cop" aria-expanded="false" aria-controls="drawer-cop">COP<small>F1–F4</small></button>
+      </div>
+    </div>
+
     <div id="srAnnouncer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
     <div id="srAnnouncerAssertive" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
     <footer class="footer-status">
