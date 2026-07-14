@@ -61,9 +61,10 @@ grouped by theme rather than by commit.
 - **Per-node Disconnect** button on each row in Connected Nodes.
 - **Actionable errors**: `setFooter()` can append an Open Settings button;
   used when the extension is unconfigured and on any 401/403 API error.
-- **SSE gating**: probes `GET /capabilities` before opening the event
-  stream, so a wrong API key or a pre-v1.4 backend degrades straight to
-  polling instead of looping silently; gives up on SSE after 5
+- **SSE gating**: probes `GET /version` before opening the event stream
+  and honors its `events_enabled` field, so a wrong API key, an
+  unreachable backend, or a backend with events disabled degrades straight
+  to polling instead of looping silently; gives up on SSE after 5
   consecutive stream errors; a manual refresh retries the live connection.
 - **Bundled fonts**: Share Tech Mono and Oswald (latin subset, woff2) now
   ship in `fonts/` and load via `@font-face` in `themes.css`. Zero

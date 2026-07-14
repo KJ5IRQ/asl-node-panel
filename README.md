@@ -3,7 +3,7 @@
 A Chrome side panel extension for monitoring and controlling your AllStarLink node via [ASL3-API](https://github.com/KJ5IRQ/asl3-api). Connects to a FastAPI-based REST middleware running on your ASL3 Raspberry Pi.
 
 **Current version:** v0.8.0  
-**Backend required:** ASL3-API v1.4.1+ running on your Pi
+**Backend required:** ASL3-API v1.4.0+ running on your Pi
 
 ---
 
@@ -111,7 +111,7 @@ A Chrome side panel extension for monitoring and controlling your AllStarLink no
 ## Requirements
 
 - Chrome 123+
-- [ASL3-API](https://github.com/KJ5IRQ/asl3-api) v1.4.1+ running on your ASL3 Pi
+- [ASL3-API](https://github.com/KJ5IRQ/asl3-api) v1.4.0+ running on your ASL3 Pi
 - Your Pi's local IP and the API key from your ASL3-API config
 
 ---
@@ -170,8 +170,7 @@ asl-node-panel/
 | `GET /nodes?enrich=true` | Connected nodes with callsign/location |
 | `GET /audit` | Audit log entries |
 | `GET /lookup/{node}` | Node lookup by number |
-| `GET /version` | API version info |
-| `GET /capabilities` | Backend feature probe, gates whether SSE is attempted (v1.4+) |
+| `GET /version` | API version info; its `events_enabled` field gates whether SSE is attempted |
 | `GET /events` | Live event stream (SSE), `api_key` passed as a query parameter |
 | `POST /cop/identify` | Play node ID |
 | `POST /cop/time` | Say current time |

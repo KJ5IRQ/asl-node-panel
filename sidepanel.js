@@ -18,7 +18,7 @@ import {
   copVersion,
   createEventStreamFromSettings,
   parseActiveLinks,
-  getCapabilities,
+  getVersion,
 } from "./services/api.js";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 15000;
@@ -79,13 +79,18 @@ async function startEventStream() {
 
   if (!isReady()) return;
 
-  // Probe capabilities first -- a wrong API key or a pre-v1.4 backend must
-  // not send us into a silent, infinite SSE reconnect loop. If this fails,
-  // stay on normal polling and never open the EventSource at all.
+  // Probe /version first -- a wrong API key or an unreachable backend must
+  // not send us into a silent, infinite SSE reconnect loop. events_enabled
+  // absent means an older backend that may still support SSE; the
+  // MAX_SSE_ERRORS cutoff covers that case, so only an explicit false blocks.
   try {
-    await getCapabilities();
+    const version = await getVersion();
+    if (version && version.events_enabled === false) {
+      setConnectionStatus("Polling (live events disabled on backend)");
+      return;
+    }
   } catch (error) {
-    setConnectionStatus("Polling (live events need backend v1.4+)");
+    setConnectionStatus("Polling (backend unreachable)");
     if (isAuthError(error)) setFooter(error.message, "error", 0, { settingsLink: true });
     return;
   }

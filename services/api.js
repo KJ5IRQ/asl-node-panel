@@ -183,7 +183,6 @@ export class AslAgentClient {
   async getConnectedNodes() { return this.request("/nodes?enrich=true"); }
   async getVariables() { return this.request("/variables"); }
   async getVersion() { return this.request("/version"); }
-  async getCapabilities() { return this.request("/capabilities"); }
   async getAudit(lines = DEFAULT_AUDIT_LINES) {
     return this.request(`/audit?lines=${encodeURIComponent(normalizeAuditLines(lines))}`);
   }
@@ -269,7 +268,6 @@ export async function getAudit(l = DEFAULT_AUDIT_LINES) { return (await createCl
 export async function getVariables()             { return (await createClientFromSettings()).getVariables(); }
 export async function lookupNode(n)              { return (await createClientFromSettings()).lookupNode(n); }
 export async function getVersion()               { return (await createClientFromSettings()).getVersion(); }
-export async function getCapabilities()          { return (await createClientFromSettings()).getCapabilities(); }
 export async function copIdentify()              { return (await createClientFromSettings()).copIdentify(); }
 export async function copTime()                  { return (await createClientFromSettings()).copTime(); }
 export async function copStatus()                { return (await createClientFromSettings()).copStatus(); }
