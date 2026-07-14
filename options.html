@@ -301,6 +301,7 @@
         <label for="themePreset">Preset</label>
         <select id="themePreset">
           <option value="system">System Default</option>
+          <option value="instrument">Instrument</option>
           <option value="sigcorps">Signal Corps</option>
           <option value="navy">Dark Navy</option>
           <option value="slate">Slate</option>
@@ -400,6 +401,42 @@
         <label for="nodeCountWarning">Warn when connected nodes exceeds</label>
         <input id="nodeCountWarning" type="number" min="0" max="999" placeholder="0 = disabled" />
         <p class="hint">Panel header flashes amber when this threshold is crossed. Set to 0 to disable.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="tot-title">
+      <h2 id="tot-title">Timeout Timer (TOT)</h2>
+
+      <div class="field-group">
+        <label for="totSeconds">Transmit timeout</label>
+        <select id="totSeconds" name="totSeconds">
+          <option value="180">3:00 (default)</option>
+          <option value="150">2:30</option>
+          <option value="120">2:00</option>
+          <option value="0">Off</option>
+        </select>
+        <p class="hint">
+          When you key up (your node's receiver hears you, sending audio out to
+          the network), the panel arms a countdown and re-arms it on every
+          re-key. Most repeaters and linked systems time out around three
+          minutes.
+        </p>
+      </div>
+
+      <div class="field-group">
+        <label class="toggle-label" for="totBeep">
+          <span>Timeout warning beeps</span>
+          <input type="checkbox" id="totBeep" role="switch" aria-checked="false" />
+        </label>
+        <p class="hint">Beep at 60 seconds left, each of the final 5 seconds, and a triple beep at timeout. Off by default.</p>
+      </div>
+
+      <div class="field-group">
+        <label class="toggle-label" for="keyupBeep">
+          <span>Courtesy beep on remote unkey</span>
+          <input type="checkbox" id="keyupBeep" role="switch" aria-checked="false" />
+        </label>
+        <p class="hint">A short beep when a remote station stops transmitting. Off by default.</p>
       </div>
     </section>
 

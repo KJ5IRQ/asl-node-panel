@@ -420,6 +420,72 @@
   --shadow:       rgba(0,0,0,0.12);
 }
 
+/* ── Instrument preset (v0.9 "Faceplate") ────────────────────────────────────
+   A radio front-panel skin: near-black olive-tinted bezel, amber phosphor
+   readouts, green for inbound/success. The faceplate layout works under every
+   theme; this is its native look. */
+:root[data-theme="instrument"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg:           #101109;
+  --panel:        #17180e;
+  --panel-soft:   #1d1e12;
+  --panel-strong: #23241a;
+  --panel-inset:  #0a0b06;
+  --text:         #d8d3a8;
+  --text-bright:  #f2ecc4;
+  --muted:        #a5a081;
+  --faint:        #8f8b6e;
+  --border:       #34321f;
+  --border-bright:#494726;
+  --border-soft:  rgba(216,164,26,0.14);
+  --accent:       #7d8a3e;
+  --accent-hover: #93a24c;
+  --accent-text:  #0a0b06;
+  --amber:        #ffc250;
+  --amber-dim:    #b98a2e;
+  --success:      #7dde8b;
+  --success-text: #bff0c2;
+  --warning:      #ffb02e;
+  --warning-text: #ffd98a;
+  --danger:       #ff6a4a;
+  --danger-text:  #ff9a80;
+  --danger-border:rgba(255,106,74,0.45);
+  --danger-hover: rgba(255,106,74,0.12);
+  --input:        #0a0b06;
+  --shadow:       rgba(0,0,0,0.7);
+}
+
+:root[data-theme="instrument"][data-mode="light"] {
+  color-scheme: light;
+  --bg:           #edeade;
+  --panel:        #f4f1e5;
+  --panel-soft:   #ebe7d6;
+  --panel-strong: #e2ddc8;
+  --panel-inset:  #faf8ee;
+  --text:         #2a2812;
+  --text-bright:  #1a1808;
+  --muted:        #5a5638;
+  --faint:        #726e4d;
+  --border:       #c4bd94;
+  --border-bright:#a49b6e;
+  --border-soft:  rgba(120,110,50,0.22);
+  --accent:       #5f6a2a;
+  --accent-hover: #4c561f;
+  --accent-text:  #f7f4e8;
+  --amber:        #8a5a0e;
+  --amber-dim:    #6a4400;
+  --success:      #2f7d3f;
+  --success-text: #1f5a2c;
+  --warning:      #8a5000;
+  --warning-text: #6a3c00;
+  --danger:       #a83420;
+  --danger-text:  #822515;
+  --danger-border:rgba(168,52,32,0.40);
+  --danger-hover: rgba(168,52,32,0.10);
+  --input:        #faf8ee;
+  --shadow:       rgba(0,0,0,0.14);
+}
+
 /* ── Custom preset: theme engine writes inline vars directly ─────────────────── */
 /* No selector needed -- theme.js sets style properties on :root */
 

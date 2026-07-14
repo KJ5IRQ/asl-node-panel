@@ -101,6 +101,7 @@ const variantNames = Object.keys(allVariants).sort();
 test("themes.css parsing found all expected palette variants", () => {
   const expected = [
     "system-light", "system-dark",
+    "instrument-dark", "instrument-light",
     "sigcorps-dark", "sigcorps-light",
     "navy-dark", "navy-light",
     "slate-dark", "slate-light",
